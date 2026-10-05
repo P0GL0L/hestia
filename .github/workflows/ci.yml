@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  bootstrap:
+    name: bootstrap
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Required repo files
+        run: |
+          set -eu
+          test -f README.md
+          test -f LICENSE
+          test -f CONTRIBUTING.md
+          test -f docs/AGENT-RULES.md
+          test -f docs/ARCHITECTURE.md
+          test -f docs/WORKSTREAMS.md
+          test -f docs/briefs/stream-0-contracts.md
+          grep -q "Apache License" LICENSE
+          grep -q "Version 2.0" LICENSE
+          echo "bootstrap ok"
