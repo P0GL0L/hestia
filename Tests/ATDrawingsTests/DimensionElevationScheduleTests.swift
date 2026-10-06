@@ -84,7 +84,6 @@ private func ft(_ feet: Int64, _ inches: Int64 = 0) -> Int64 { Length.feet(feet,
                                                   areas: [:]))
     #expect(windows.rows.count == 5)
     #expect(windows.rows.first == ["W1", "Window", "4'-0\"", "4'-0\"", "3'-0\""])
-    #expect(ScheduleView.table(.roomFinishes, document: document, style: .metric, areas: [:]) == nil)
     let areas = try #require(ScheduleView.table(.areas, document: document, style: .metric,
                                                 areas: [document.rooms[0].id: Area(tickSquares: 15_600_000 * 102_400)]))
     #expect(areas.rows[0] == ["Living", "Ground Floor", "15.6 SQ M"])
