@@ -1,7 +1,7 @@
 import ATContracts
 import Foundation
 
-/// Door, window, and area schedules drawn as ruled tables in paper space.
+/// Door, window, room finish, and area schedules drawn as ruled tables in paper space.
 enum ScheduleView {
     static let ruleStyle = DisplayStyle(layer: "A-ANNO-SCHD", pen: .thin)
     static let headStyle = DisplayStyle(layer: "A-ANNO-SCHD", pen: .medium)
@@ -66,7 +66,14 @@ enum ScheduleView {
                      areas[room.id].map { FloorPlanView.areaLabel($0, imperial: imperial) } ?? "-"]
                 })
         case .roomFinishes:
-            return nil
+            return Table(
+                title: "Room Finish Schedule",
+                columns: [("ROOM", mmTicks(36)), ("STOREY", mmTicks(30)), ("FLOOR", mmTicks(50)),
+                          ("WALLS", mmTicks(50)), ("CEILING", mmTicks(50))],
+                rows: document.rooms.map { room in
+                    [room.name, document.storeys.first { $0.id == room.storeyID }?.name ?? "-",
+                     room.floorFinish ?? "-", room.wallFinish ?? "-", room.ceilingFinish ?? "-"]
+                })
         }
     }
 
