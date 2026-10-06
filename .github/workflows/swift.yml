@@ -1,0 +1,27 @@
+name: Swift
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: swift test (linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Swift 6
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.0"
+
+      - name: Run tests
+        run: |
+          set -eu
+          if [ ! -f Package.swift ]; then
+            echo "Skipping swift test: Package.swift does not exist yet."
+            exit 0
+          fi
+          swift test
