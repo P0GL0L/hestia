@@ -95,7 +95,27 @@ public struct SchematicDrawingSet: DrawingGenerator {
                 return SheetFrame.notGenerated(Self.name(of: view), in: slot)
             }
             return ScheduleView.items(table, at: paperPoint(slot.minX, slot.maxY - mmTicks(8)))
-        case .cover, .roofPlan, .sitePlan, .section, .electricalPlan:
+        case .cover:
+            return CoverSheet.items(project: document.project.name, index: sheetsToDraw(document), in: slot)
+        case .roofPlan:
+            guard let extent = RoofPlanView.extent(document) else {
+                return SheetFrame.notGenerated("Roof plan has no roof", in: slot)
+            }
+            let scale = sheet.scale ?? Self.fittingScale(extent: extent, in: slot)
+            let placed = ViewTransform.centering(modelMin: extent.min, modelMax: extent.max, in: slot, scale: scale)
+            let under = paperPoint(placed.transform.paperOrigin.x.ticks,
+                                   placed.transform.paperOrigin.y.ticks - mmTicks(12))
+            return RoofPlanView.items(document, view: placed.transform)
+                + SheetFrame.viewTitle("Roof Plan", scale: scale, at: placed.fits ? under : titleAt)
+        case .sitePlan:
+            guard let extent = SitePlanView.extent(document) else {
+                return SheetFrame.notGenerated("Site plan has no building or terrain", in: slot)
+            }
+            let scale = sheet.scale ?? Self.fittingScale(extent: extent, in: slot)
+            let placed = ViewTransform.centering(modelMin: extent.min, modelMax: extent.max, in: slot, scale: scale)
+            return SitePlanView.items(document, view: placed.transform, area: slot)
+                + SheetFrame.viewTitle("Site Plan", scale: scale, at: titleAt)
+        case .section, .electricalPlan:
             return SheetFrame.notGenerated(Self.name(of: view), in: slot)
         }
     }
@@ -120,12 +140,14 @@ public struct SchematicDrawingSet: DrawingGenerator {
 
     /// The largest standard scale at which the extent fits the slot, falling back to 1:200.
     static func fittingScale(extent: (min: Point2, max: Point2), in slot: PaperRect) -> DrawingScale {
-        let candidates: [DrawingScale] = [.quarterInch, .oneTo50, .eighthInch, .oneTo100]
+        let candidates: [DrawingScale] = [.quarterInch, .oneTo50, .eighthInch, .oneTo100,
+                                          DrawingScale(label: "1\" = 20'-0\"", modelUnitsPerPaperUnit: 240),
+                                          DrawingScale(label: "1:500", modelUnitsPerPaperUnit: 500)]
         for scale in candidates {
             let placed = ViewTransform.centering(modelMin: extent.min, modelMax: extent.max, in: slot, scale: scale)
             if placed.fits { return scale }
         }
-        return DrawingScale(label: "1:200", modelUnitsPerPaperUnit: 200)
+        return DrawingScale(label: "1:1000", modelUnitsPerPaperUnit: 1000)
     }
 }
 
