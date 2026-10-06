@@ -68,6 +68,9 @@ public struct Opening: Hashable, Codable, Sendable {
     public var width: Length
     public var height: Length
     public var sillHeight: Length
+    public var kind: OpeningKind
+    /// Swing for hinged doors; nil for windows and sliding, pocket, folding, and garage doors.
+    public var swing: DoorSwing?
 
     public init(
         id: OpeningID,
@@ -75,7 +78,9 @@ public struct Opening: Hashable, Codable, Sendable {
         offsetAlongWall: Length,
         width: Length,
         height: Length,
-        sillHeight: Length
+        sillHeight: Length,
+        kind: OpeningKind? = nil,
+        swing: DoorSwing? = nil
     ) {
         self.id = id
         self.wallID = wallID
@@ -83,6 +88,32 @@ public struct Opening: Hashable, Codable, Sendable {
         self.width = width
         self.height = height
         self.sillHeight = sillHeight
+        self.kind = kind ?? Opening.defaultKind(sillHeight: sillHeight)
+        self.swing = swing
+    }
+
+    /// A zero sill reads as a single door, anything higher as a window.
+    public static func defaultKind(sillHeight: Length) -> OpeningKind {
+        sillHeight.ticks == 0 ? .singleDoor : .window
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, wallID, offsetAlongWall, width, height, sillHeight, kind, swing
+    }
+
+    /// Files written before `kind` existed decode with `defaultKind(sillHeight:)`.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try c.decode(OpeningID.self, forKey: .id),
+            wallID: try c.decode(WallID.self, forKey: .wallID),
+            offsetAlongWall: try c.decode(Length.self, forKey: .offsetAlongWall),
+            width: try c.decode(Length.self, forKey: .width),
+            height: try c.decode(Length.self, forKey: .height),
+            sillHeight: try c.decode(Length.self, forKey: .sillHeight),
+            kind: try c.decodeIfPresent(OpeningKind.self, forKey: .kind),
+            swing: try c.decodeIfPresent(DoorSwing.self, forKey: .swing)
+        )
     }
 }
 

@@ -23,6 +23,15 @@ enum Sample {
     static let newWindow = OpeningID(uuid(31))
     static let room = RoomID(uuid(40))
     static let newRoom = RoomID(uuid(41))
+    static let stair = StairID(uuid(50))
+    static let newStair = StairID(uuid(51))
+    static let roof = RoofID(uuid(52))
+    static let newRoof = RoofID(uuid(53))
+    static let slab = SlabID(uuid(54))
+    static let newSlab = SlabID(uuid(55))
+    static let sheet = SheetID(uuid(56))
+    static let newSheet = SheetID(uuid(57))
+    static let footprint = [point(0, 0), point(4000, 0), point(4000, 3000), point(0, 3000)]
 
     static func point(_ xMM: Int64, _ yMM: Int64) -> Point2 {
         Point2(x: .millimeters(xMM), y: .millimeters(yMM))
@@ -57,6 +66,22 @@ enum Sample {
             ],
             rooms: [
                 Room(id: room, storeyID: storey, name: "Living", boundaryWallIDs: [wallSouth, wallEast]),
+            ],
+            stairs: [
+                Stair(id: stair, storeyID: storey, runStart: point(1000, 2000), runEnd: point(1000, 4500),
+                      width: .millimeters(900), riserCount: 15, riserHeight: .millimeters(180)),
+            ],
+            roofs: [
+                Roof(id: roof, storeyID: storey, footprint: footprint, eaveHeight: .millimeters(2400),
+                     planes: Array(repeating: RoofPlane(pitchRisePer12: .inches(6), overhang: .millimeters(450)),
+                                   count: 4)),
+            ],
+            slabs: [
+                Slab(id: slab, storeyID: storey, outline: footprint, thickness: .millimeters(150)),
+            ],
+            sheets: [
+                Sheet(id: sheet, number: "A-101", title: "Ground Floor Plan", paper: .archD,
+                      scale: .quarterInch, views: [.floorPlan(storeyID: storey)]),
             ]
         )
     }

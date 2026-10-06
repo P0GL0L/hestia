@@ -12,6 +12,7 @@
         "ticks" : 2438400
       },
       "id" : "00000000-0000-4000-8000-000000000006",
+      "kind" : "singleDoor",
       "offsetAlongWall" : {
         "ticks" : 1463040
       },
@@ -28,6 +29,9 @@
     "id" : "00000000-0000-4000-8000-000000000001",
     "name" : "Rect Cottage"
   },
+  "roofs" : [
+
+  ],
   "rooms" : [
     {
       "boundaryWallIDs" : [
@@ -40,6 +44,15 @@
     }
   ],
   "schemaVersion" : 1,
+  "sheets" : [
+
+  ],
+  "slabs" : [
+
+  ],
+  "stairs" : [
+
+  ],
   "storeys" : [
     {
       "buildingID" : "00000000-0000-4000-8000-000000000002",
