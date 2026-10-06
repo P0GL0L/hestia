@@ -72,6 +72,7 @@ public struct SchematicDrawingSet: DrawingGenerator {
             return FloorPlanView.items(document: document, storey: storeyID, outlines: outlines, areas: areas,
                                        view: placed.transform)
                 + DimensionChains.items(document: document, storey: storeyID, view: placed.transform)
+                + DimensionChains.interiorItems(document: document, storey: storeyID, view: placed.transform)
                 + SheetFrame.viewTitle("\(storeyName) Plan", scale: scale, at: placed.fits ? under : titleAt)
         case let .elevation(direction):
             let name = Self.name(of: view)
