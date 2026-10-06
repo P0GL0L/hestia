@@ -32,6 +32,10 @@ enum ScheduleView {
     static func table(_ kind: ScheduleKind, document: ModelDocument, style: LengthFormatStyle,
                       areas: [RoomID: Area]) -> Table? {
         func f(_ length: Length) -> String { LengthFormatting.format(length, style: style) }
+        /// An opening's width cell: its width override when it has one, else the measured width.
+        func width(_ opening: Opening) -> String {
+            document.dimensionOverride(for: opening.id.rawValue, face: .width) ?? f(opening.width)
+        }
         let marks = marks(document)
         switch kind {
         case .doors:
@@ -40,7 +44,7 @@ enum ScheduleView {
                 columns: [("MARK", mmTicks(16)), ("TYPE", mmTicks(32)), ("WIDTH", mmTicks(26)),
                           ("HEIGHT", mmTicks(26)), ("SWING", mmTicks(40))],
                 rows: document.openings.filter(\.kind.isDoor).map { door in
-                    [marks[door.id] ?? "", words(door.kind.rawValue), f(door.width), f(door.height),
+                    [marks[door.id] ?? "", words(door.kind.rawValue), width(door), f(door.height),
                      door.swing.map { "\($0.hinge == .nearStart ? "Start" : "End") hinge, \($0.opensToward.rawValue)" } ?? "-"]
                 })
         case .windows:
@@ -49,7 +53,7 @@ enum ScheduleView {
                 columns: [("MARK", mmTicks(16)), ("TYPE", mmTicks(40)), ("WIDTH", mmTicks(26)),
                           ("HEIGHT", mmTicks(26)), ("SILL", mmTicks(26))],
                 rows: document.openings.filter { !$0.kind.isDoor }.map { window in
-                    [marks[window.id] ?? "", words(window.kind.rawValue), f(window.width), f(window.height),
+                    [marks[window.id] ?? "", words(window.kind.rawValue), width(window), f(window.height),
                      f(window.sillHeight)]
                 })
         case .areas:

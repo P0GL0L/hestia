@@ -21,11 +21,16 @@ enum DimensionChains {
         // West face: stops along y, chain drawn to the left, bottom to top.
         let west = stops(walls: walls, openings: openings, alongX: false, face: extent.min.x.ticks,
                          low: extent.min.y.ticks, high: extent.max.y.ticks)
+        // A segment that is exactly one wall prints that wall's override for this face; others stay measured.
+        let southLabels = wallLabels(document: document, walls: walls, alongX: true, face: .south)
+        let westLabels = wallLabels(document: document, walls: walls, alongX: false, face: .west)
         for (tier, chain) in [south.openings, south.walls, south.overall].enumerated() where chain.count > 2 || tier == 2 {
-            items += chainItems(chain, alongX: true, face: extent.min.y.ticks, offset: tierOffsets[tier], view: view)
+            items += chainItems(chain, alongX: true, face: extent.min.y.ticks, offset: tierOffsets[tier], view: view,
+                                labels: southLabels)
         }
         for (tier, chain) in [west.openings, west.walls, west.overall].enumerated() where chain.count > 2 || tier == 2 {
-            items += chainItems(chain, alongX: false, face: extent.min.x.ticks, offset: tierOffsets[tier], view: view)
+            items += chainItems(chain, alongX: false, face: extent.min.x.ticks, offset: tierOffsets[tier], view: view,
+                                labels: westLabels)
         }
         return items
     }
@@ -62,8 +67,32 @@ enum DimensionChains {
         return (openingStops.sorted(), wallStops.sorted(), [low, high])
     }
 
+    /// Wall overrides for exterior segments that are exactly one wall: the wall's outer extent along the face.
+    static func wallLabels(document: ModelDocument, walls: [Wall], alongX: Bool, face: DimensionFace) -> [Span: String] {
+        var labels: [Span: String] = [:]
+        for wall in walls {
+            guard let text = document.dimensionOverride(for: wall.id.rawValue, face: face) else { continue }
+            let runsAlong = alongX ? wall.start.y == wall.end.y : wall.start.x == wall.end.x
+            guard runsAlong else { continue }
+            let a = alongX ? wall.start.x.ticks : wall.start.y.ticks
+            let b = alongX ? wall.end.x.ticks : wall.end.y.ticks
+            let half = wall.thickness.ticks / 2
+            labels[Span(min(a, b) - half, max(a, b) + half)] = text
+        }
+        return labels
+    }
+
+    struct Span: Hashable {
+        var low: Int64
+        var high: Int64
+        init(_ low: Int64, _ high: Int64) {
+            self.low = low
+            self.high = high
+        }
+    }
+
     private static func chainItems(
-        _ stops: [Int64], alongX: Bool, face: Int64, offset: Int64, view: ViewTransform
+        _ stops: [Int64], alongX: Bool, face: Int64, offset: Int64, view: ViewTransform, labels: [Span: String]
     ) -> [DisplayItem] {
         zip(stops, stops.dropFirst()).map { a, b in
             let from = view.paper(alongX ? paperPoint(a, face) : paperPoint(face, a))
@@ -71,7 +100,7 @@ enum DimensionChains {
             // Left of a rightward chain is inside the building, so the south chain uses a negative offset;
             // left of an upward chain is outside, so the west chain uses a positive one.
             return DisplayItem(.dimension(from: from, to: to, offset: Length(ticks: alongX ? -offset : offset),
-                                          override: nil), style: style)
+                                          override: labels[Span(a, b)]), style: style)
         }
     }
 
@@ -85,11 +114,14 @@ enum DimensionChains {
             guard let clear = clearBox(boundary) else { continue }
             let (x0, x1, y0, y1) = clear
             let y = y0 + (y1 - y0) / 4, x = x0 + (x1 - x0) / 4
+            let id = room.id.rawValue
             items.append(DisplayItem(.dimension(from: view.paper(paperPoint(x0, y)), to: view.paper(paperPoint(x1, y)),
-                                                offset: Length(ticks: 0), override: nil),
+                                                offset: Length(ticks: 0),
+                                                override: document.dimensionOverride(for: id, face: .width)),
                                      style: style, elementID: room.id.rawValue))
             items.append(DisplayItem(.dimension(from: view.paper(paperPoint(x, y0)), to: view.paper(paperPoint(x, y1)),
-                                                offset: Length(ticks: 0), override: nil),
+                                                offset: Length(ticks: 0),
+                                                override: document.dimensionOverride(for: id, face: .depth)),
                                      style: style, elementID: room.id.rawValue))
         }
         return items
