@@ -162,6 +162,10 @@ public enum CommandCatalog {
         MoveOpeningCommand.self,
         ResizeOpeningCommand.self,
         RemoveOpeningCommand.self,
+        AddRoomCommand.self,
+        RenameRoomCommand.self,
+        SetRoomBoundaryCommand.self,
+        RemoveRoomCommand.self,
     ]
 
     public static var descriptors: [CommandDescriptor] {
