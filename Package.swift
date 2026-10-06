@@ -12,6 +12,8 @@ let package = Package(
         .library(name: "ATGeometry", targets: ["ATGeometry"]),
         .library(name: "ATExchange", targets: ["ATExchange"]),
         .library(name: "ATDrawings", targets: ["ATDrawings"]),
+        .library(name: "ATAgent", targets: ["ATAgent"]),
+        .library(name: "ATCatalog", targets: ["ATCatalog"]),
     ],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-testing.git", from: "0.10.0"),
@@ -29,6 +31,14 @@ let package = Package(
         .target(
             name: "ATDrawings",
             dependencies: ["ATContracts", "ATGeometry"]
+        ),
+        .target(
+            name: "ATAgent",
+            dependencies: ["ATContracts"]
+        ),
+        .target(
+            name: "ATCatalog",
+            dependencies: ["ATContracts"]
         ),
         .testTarget(
             name: "ATContractsTests",
@@ -59,6 +69,22 @@ let package = Package(
             dependencies: [
                 "ATDrawings",
                 "ATGeometry",
+                "ATContracts",
+                .product(name: "Testing", package: "swift-testing"),
+            ]
+        ),
+        .testTarget(
+            name: "ATAgentTests",
+            dependencies: [
+                "ATAgent",
+                "ATContracts",
+                .product(name: "Testing", package: "swift-testing"),
+            ]
+        ),
+        .testTarget(
+            name: "ATCatalogTests",
+            dependencies: [
+                "ATCatalog",
                 "ATContracts",
                 .product(name: "Testing", package: "swift-testing"),
             ]
