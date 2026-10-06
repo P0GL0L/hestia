@@ -30,6 +30,8 @@ public struct ModelDocument: Hashable, Codable, Sendable {
     public var placements: [Placement]
     public var terrainPatches: [TerrainPatch]
     public var mepSymbols: [MEPSymbol]
+    /// Display text replacing measured dimension values. The measured value stays the source of truth.
+    public var dimensionOverrides: [DimensionOverride]
 
     public init(
         schemaVersion: Int,
@@ -48,7 +50,8 @@ public struct ModelDocument: Hashable, Codable, Sendable {
         beams: [Beam] = [],
         placements: [Placement] = [],
         terrainPatches: [TerrainPatch] = [],
-        mepSymbols: [MEPSymbol] = []
+        mepSymbols: [MEPSymbol] = [],
+        dimensionOverrides: [DimensionOverride] = []
     ) {
         self.schemaVersion = schemaVersion
         self.project = project
@@ -67,11 +70,12 @@ public struct ModelDocument: Hashable, Codable, Sendable {
         self.placements = placements
         self.terrainPatches = terrainPatches
         self.mepSymbols = mepSymbols
+        self.dimensionOverrides = dimensionOverrides
     }
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, project, buildings, storeys, walls, openings, rooms, stairs, roofs, slabs, sheets
-        case layers, columns, beams, placements, terrainPatches, mepSymbols
+        case layers, columns, beams, placements, terrainPatches, mepSymbols, dimensionOverrides
     }
 
     public init(from decoder: Decoder) throws {
@@ -97,7 +101,8 @@ public struct ModelDocument: Hashable, Codable, Sendable {
             beams: try c.decodeIfPresent([Beam].self, forKey: .beams) ?? [],
             placements: try c.decodeIfPresent([Placement].self, forKey: .placements) ?? [],
             terrainPatches: try c.decodeIfPresent([TerrainPatch].self, forKey: .terrainPatches) ?? [],
-            mepSymbols: try c.decodeIfPresent([MEPSymbol].self, forKey: .mepSymbols) ?? []
+            mepSymbols: try c.decodeIfPresent([MEPSymbol].self, forKey: .mepSymbols) ?? [],
+            dimensionOverrides: try c.decodeIfPresent([DimensionOverride].self, forKey: .dimensionOverrides) ?? []
         )
     }
 
