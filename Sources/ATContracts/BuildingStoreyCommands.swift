@@ -205,7 +205,7 @@ public struct RemoveStoreyCommand: Command {
     }
 
     public static let commandName = "remove_storey"
-    public static let toolDescription = "Remove a storey that has no walls or rooms; remove those first."
+    public static let toolDescription = "Remove a storey with nothing on it and no sheet showing it; remove those first."
     public static let parameters = [
         CommandParameter("storeyID", .id, "ID of the storey to remove."),
     ]
@@ -213,7 +213,11 @@ public struct RemoveStoreyCommand: Command {
     public func validate(against document: ModelDocument) throws {
         _ = try document.storeyIndex(storeyID)
         if document.walls.contains(where: { $0.storeyID == storeyID })
-            || document.rooms.contains(where: { $0.storeyID == storeyID }) {
+            || document.rooms.contains(where: { $0.storeyID == storeyID })
+            || document.stairs.contains(where: { $0.storeyID == storeyID })
+            || document.roofs.contains(where: { $0.storeyID == storeyID })
+            || document.slabs.contains(where: { $0.storeyID == storeyID })
+            || document.sheets.contains(where: { $0.views.contains { $0.storeyID == storeyID } }) {
             throw CommandValidationError.hasDependents(storeyID.rawValue)
         }
     }
