@@ -217,7 +217,11 @@ public struct RemoveStoreyCommand: Command {
             || document.stairs.contains(where: { $0.storeyID == storeyID })
             || document.roofs.contains(where: { $0.storeyID == storeyID })
             || document.slabs.contains(where: { $0.storeyID == storeyID })
-            || document.sheets.contains(where: { $0.views.contains { $0.storeyID == storeyID } }) {
+            || document.sheets.contains(where: { $0.views.contains { $0.storeyID == storeyID } })
+            || document.columns.contains(where: { $0.storeyID == storeyID })
+            || document.beams.contains(where: { $0.storeyID == storeyID })
+            || document.placements.contains(where: { $0.storeyID == storeyID })
+            || document.mepSymbols.contains(where: { $0.storeyID == storeyID }) {
             throw CommandValidationError.hasDependents(storeyID.rawValue)
         }
     }

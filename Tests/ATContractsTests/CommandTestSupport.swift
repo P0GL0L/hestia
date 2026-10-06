@@ -31,6 +31,19 @@ enum Sample {
     static let newSlab = SlabID(uuid(55))
     static let sheet = SheetID(uuid(56))
     static let newSheet = SheetID(uuid(57))
+    static let layer = LayerID(uuid(70))
+    static let newLayer = LayerID(uuid(71))
+    static let spareLayer = LayerID(uuid(82))
+    static let column = ColumnID(uuid(72))
+    static let newColumn = ColumnID(uuid(73))
+    static let beam = BeamID(uuid(74))
+    static let newBeam = BeamID(uuid(75))
+    static let placement = PlacementID(uuid(76))
+    static let newPlacement = PlacementID(uuid(77))
+    static let symbol = MEPSymbolID(uuid(78))
+    static let newSymbol = MEPSymbolID(uuid(79))
+    static let terrain = TerrainPatchID(uuid(80))
+    static let newTerrain = TerrainPatchID(uuid(81))
     static let footprint = [point(0, 0), point(4000, 0), point(4000, 3000), point(0, 3000)]
 
     static func point(_ xMM: Int64, _ yMM: Int64) -> Point2 {
@@ -82,12 +95,37 @@ enum Sample {
             sheets: [
                 Sheet(id: sheet, number: "A-101", title: "Ground Floor Plan", paper: .archD,
                       scale: .quarterInch, views: [.floorPlan(storeyID: storey)]),
+            ],
+            layers: [
+                Layer(id: layer, name: "Structure", colorRGB: [200, 40, 40]),
+                Layer(id: spareLayer, name: "Old", colorRGB: [9, 9, 9], isVisible: false, isLocked: true),
+            ],
+            columns: [
+                Column(id: column, storeyID: storey, shape: .rectangular, center: point(2000, 1500),
+                       width: .millimeters(300), depth: .millimeters(300), height: .millimeters(2400), layerID: layer),
+            ],
+            beams: [
+                Beam(id: beam, storeyID: storey, start: point(0, 1500), end: point(4000, 1500),
+                     width: .millimeters(200), depth: .millimeters(300), topOffset: .millimeters(2400)),
+            ],
+            placements: [
+                Placement(id: placement, storeyID: storey, catalogItemID: CatalogItemID(rawValue: "living/sofa"),
+                          position: point(1000, 2500)),
+            ],
+            terrainPatches: [
+                TerrainPatch(id: terrain, name: "Lot", boundary: [point(-5000, -5000), point(9000, -5000),
+                                                                  point(9000, 8000), point(-5000, 8000)],
+                             surveyPoints: [Point3(x: .millimeters(0), y: .millimeters(0), z: .millimeters(100))]),
+            ],
+            mepSymbols: [
+                MEPSymbol(id: symbol, storeyID: storey, kind: .duplexOutlet, position: point(100, 1000),
+                          mountingHeight: .millimeters(300)),
             ]
         )
     }
 
     /// One valid instance of every v1 command against `document()`.
-    static let commands: [AnyCommand] = core + buildingsAndStoreys + wallsAndOpenings + rooms + alphaElements
+    static let commands: [AnyCommand] = core + buildingsAndStoreys + wallsAndOpenings + rooms + alphaElements + siteAndFurnishing
 
     static let core: [AnyCommand] = [
         RenameProjectCommand(projectID: project, newName: "Renamed").erased,
