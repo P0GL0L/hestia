@@ -161,3 +161,15 @@ private func strings(_ sheet: SheetDrawing) -> [String] {
     #expect(livingCenter == Point2(x: .inches(84), y: .inches(72)))
     #expect(bathCenter == Point2(x: .inches(234), y: .inches(210)))
 }
+
+@Test func cottageElevationSheetHasFourElevationsThatFit() throws {
+    let sheets = try SchematicDrawingSet().sheets(for: cottage(), geometry: OutlinerGeometry())
+    let elevations = try #require(sheets.first { $0.number == "A-201" })
+    let text = strings(elevations)
+    for direction in ["SOUTH", "NORTH", "EAST", "WEST"] { #expect(text.contains("\(direction) ELEVATION")) }
+    #expect(!text.contains { $0.contains("not generated") })
+    // Each elevation stays at 1/4" = 1'-0" because it fits its band; none falls back to the corner title.
+    #expect(text.filter { $0 == "SCALE: 1/4\" = 1'-0\"" }.count == 4)
+    let bounds = try #require(elevations.content.bounds)
+    #expect(bounds.max.x <= elevations.paper.width && bounds.max.y <= elevations.paper.height)
+}
