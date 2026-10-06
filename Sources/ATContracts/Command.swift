@@ -53,6 +53,8 @@ public enum CommandValidationError: Error, Sendable, Equatable {
     case mepSymbolNotFound(MEPSymbolID)
     /// No column, beam, placement, or symbol has this ID.
     case elementNotFound(UUID)
+    /// No override is stored for this element and face.
+    case dimensionOverrideNotFound(UUID, DimensionFace)
 }
 
 /// The JSON shape of one command parameter, so tool schemas can be generated from the catalog.
@@ -243,6 +245,8 @@ public enum CommandCatalog {
         AddTerrainPatchCommand.self,
         SetTerrainPointsCommand.self,
         RemoveTerrainPatchCommand.self,
+        SetDimensionOverrideCommand.self,
+        ClearDimensionOverrideCommand.self,
     ]
 
     public static var descriptors: [CommandDescriptor] {

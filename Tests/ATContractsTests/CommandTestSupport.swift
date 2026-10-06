@@ -120,12 +120,13 @@ enum Sample {
             mepSymbols: [
                 MEPSymbol(id: symbol, storeyID: storey, kind: .duplexOutlet, position: point(100, 1000),
                           mountingHeight: .millimeters(300)),
-            ]
+            ],
+            dimensionOverrides: [DimensionOverride(elementID: room.rawValue, face: .width, text: "VERIFY")]
         )
     }
 
     /// One valid instance of every v1 command against `document()`.
-    static let commands: [AnyCommand] = core + buildingsAndStoreys + wallsAndOpenings + rooms + alphaElements + siteAndFurnishing
+    static let commands: [AnyCommand] = core + buildingsAndStoreys + wallsAndOpenings + rooms + alphaElements + siteAndFurnishing + overrides
 
     static let core: [AnyCommand] = [
         RenameProjectCommand(projectID: project, newName: "Renamed").erased,
