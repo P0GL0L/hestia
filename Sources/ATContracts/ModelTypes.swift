@@ -172,11 +172,35 @@ public struct Room: Hashable, Codable, Sendable {
     public var storeyID: StoreyID
     public var name: String
     public var boundaryWallIDs: [WallID]
+    /// Finish descriptions for the schedule, such as "Oak strip flooring". Nil means none recorded.
+    public var floorFinish: String?
+    public var wallFinish: String?
+    public var ceilingFinish: String?
 
-    public init(id: RoomID, storeyID: StoreyID, name: String, boundaryWallIDs: [WallID]) {
+    public init(
+        id: RoomID, storeyID: StoreyID, name: String, boundaryWallIDs: [WallID],
+        floorFinish: String? = nil, wallFinish: String? = nil, ceilingFinish: String? = nil
+    ) {
         self.id = id
         self.storeyID = storeyID
         self.name = name
         self.boundaryWallIDs = boundaryWallIDs
+        self.floorFinish = floorFinish
+        self.wallFinish = wallFinish
+        self.ceilingFinish = ceilingFinish
     }
+
+    /// The finish recorded for one surface.
+    public func finish(_ surface: RoomSurface) -> String? {
+        switch surface {
+        case .floor: return floorFinish
+        case .wall: return wallFinish
+        case .ceiling: return ceilingFinish
+        }
+    }
+}
+
+/// A room surface that can carry a finish.
+public enum RoomSurface: String, Codable, Hashable, Sendable, CaseIterable {
+    case floor, wall, ceiling
 }

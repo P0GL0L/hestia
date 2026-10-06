@@ -212,6 +212,7 @@ public enum CommandCatalog {
         RenameRoomCommand.self,
         SetRoomBoundaryCommand.self,
         RemoveRoomCommand.self,
+        SetRoomFinishCommand.self,
         SetOpeningKindCommand.self,
         AddStairCommand.self,
         MoveStairCommand.self,
