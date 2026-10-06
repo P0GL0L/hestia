@@ -24,6 +24,12 @@ public struct ModelDocument: Hashable, Codable, Sendable {
     public var roofs: [Roof]
     public var slabs: [Slab]
     public var sheets: [Sheet]
+    public var layers: [Layer]
+    public var columns: [Column]
+    public var beams: [Beam]
+    public var placements: [Placement]
+    public var terrainPatches: [TerrainPatch]
+    public var mepSymbols: [MEPSymbol]
 
     public init(
         schemaVersion: Int,
@@ -36,7 +42,13 @@ public struct ModelDocument: Hashable, Codable, Sendable {
         stairs: [Stair] = [],
         roofs: [Roof] = [],
         slabs: [Slab] = [],
-        sheets: [Sheet] = []
+        sheets: [Sheet] = [],
+        layers: [Layer] = [],
+        columns: [Column] = [],
+        beams: [Beam] = [],
+        placements: [Placement] = [],
+        terrainPatches: [TerrainPatch] = [],
+        mepSymbols: [MEPSymbol] = []
     ) {
         self.schemaVersion = schemaVersion
         self.project = project
@@ -49,10 +61,17 @@ public struct ModelDocument: Hashable, Codable, Sendable {
         self.roofs = roofs
         self.slabs = slabs
         self.sheets = sheets
+        self.layers = layers
+        self.columns = columns
+        self.beams = beams
+        self.placements = placements
+        self.terrainPatches = terrainPatches
+        self.mepSymbols = mepSymbols
     }
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, project, buildings, storeys, walls, openings, rooms, stairs, roofs, slabs, sheets
+        case layers, columns, beams, placements, terrainPatches, mepSymbols
     }
 
     public init(from decoder: Decoder) throws {
@@ -72,7 +91,13 @@ public struct ModelDocument: Hashable, Codable, Sendable {
             stairs: try c.decodeIfPresent([Stair].self, forKey: .stairs) ?? [],
             roofs: try c.decodeIfPresent([Roof].self, forKey: .roofs) ?? [],
             slabs: try c.decodeIfPresent([Slab].self, forKey: .slabs) ?? [],
-            sheets: try c.decodeIfPresent([Sheet].self, forKey: .sheets) ?? []
+            sheets: try c.decodeIfPresent([Sheet].self, forKey: .sheets) ?? [],
+            layers: try c.decodeIfPresent([Layer].self, forKey: .layers) ?? [],
+            columns: try c.decodeIfPresent([Column].self, forKey: .columns) ?? [],
+            beams: try c.decodeIfPresent([Beam].self, forKey: .beams) ?? [],
+            placements: try c.decodeIfPresent([Placement].self, forKey: .placements) ?? [],
+            terrainPatches: try c.decodeIfPresent([TerrainPatch].self, forKey: .terrainPatches) ?? [],
+            mepSymbols: try c.decodeIfPresent([MEPSymbol].self, forKey: .mepSymbols) ?? []
         )
     }
 

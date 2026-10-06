@@ -45,6 +45,14 @@ public enum CommandValidationError: Error, Sendable, Equatable {
     case sheetNotFound(SheetID)
     /// Another sheet already uses this number.
     case duplicateSheetNumber(String)
+    case layerNotFound(LayerID)
+    case columnNotFound(ColumnID)
+    case beamNotFound(BeamID)
+    case placementNotFound(PlacementID)
+    case terrainPatchNotFound(TerrainPatchID)
+    case mepSymbolNotFound(MEPSymbolID)
+    /// No column, beam, placement, or symbol has this ID.
+    case elementNotFound(UUID)
 }
 
 /// The JSON shape of one command parameter, so tool schemas can be generated from the catalog.
@@ -69,6 +77,14 @@ public enum CommandParameterKind: String, Sendable, Hashable, CaseIterable {
     case object
     /// An array of JSON objects whose shape the parameter description gives.
     case objectList
+    /// An `Angle`: `{"microDegrees": Int}`, counterclockwise from the +x axis.
+    case angle
+    /// A JSON boolean.
+    case boolean
+    /// An array of `Point3` objects `{"x": Length, "y": Length, "z": Length}`.
+    case point3List
+    /// An array of JSON integers.
+    case integerList
 }
 
 /// One typed, documented command parameter. `name` is the JSON key.
@@ -208,6 +224,25 @@ public enum CommandCatalog {
         AddSheetCommand.self,
         SetSheetTitleCommand.self,
         RemoveSheetCommand.self,
+        AddLayerCommand.self,
+        SetLayerCommand.self,
+        RemoveLayerCommand.self,
+        SetElementLayerCommand.self,
+        AddColumnCommand.self,
+        MoveColumnCommand.self,
+        RemoveColumnCommand.self,
+        AddBeamCommand.self,
+        MoveBeamCommand.self,
+        RemoveBeamCommand.self,
+        AddPlacementCommand.self,
+        MovePlacementCommand.self,
+        RemovePlacementCommand.self,
+        AddMEPSymbolCommand.self,
+        MoveMEPSymbolCommand.self,
+        RemoveMEPSymbolCommand.self,
+        AddTerrainPatchCommand.self,
+        SetTerrainPointsCommand.self,
+        RemoveTerrainPatchCommand.self,
     ]
 
     public static var descriptors: [CommandDescriptor] {
