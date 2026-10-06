@@ -130,8 +130,25 @@ public struct SchematicDrawingSet: DrawingGenerator {
                 + SectionView.annotations(document, extent: extent, view: placed.transform,
                                           imperial: units == .feetInchesFractions)
                 + SheetFrame.viewTitle("Building Section", scale: scale, at: placed.fits ? under : titleAt)
-        case .electricalPlan:
-            return SheetFrame.notGenerated(Self.name(of: view), in: slot)
+        case let .electricalPlan(storeyID):
+            let storeyName = document.storeys.first { $0.id == storeyID }?.name ?? "Floor"
+            guard document.mepSymbols.contains(where: { $0.storeyID == storeyID }),
+                  let extent = FloorPlanView.extent(of: document, storey: storeyID) else {
+                return SheetFrame.notGenerated(Self.name(of: view), in: slot)
+            }
+            let legendWidth = mmTicks(80)
+            let planArea = PaperRect(minX: slot.minX, minY: slot.minY, width: slot.width - legendWidth,
+                                     height: slot.height)
+            let scale = sheet.scale ?? Self.fittingScale(extent: extent, in: planArea)
+            let placed = ViewTransform.centering(modelMin: extent.min, modelMax: extent.max, in: planArea, scale: scale)
+            let outlines = try geometry.planView(of: document, storey: storeyID)
+            let under = paperPoint(placed.transform.paperOrigin.x.ticks,
+                                   placed.transform.paperOrigin.y.ticks - mmTicks(12))
+            return ElectricalPlanView.items(document: document, storey: storeyID, outlines: outlines,
+                                            view: placed.transform,
+                                            legendAt: paperPoint(slot.maxX - legendWidth + mmTicks(6),
+                                                                 slot.maxY - mmTicks(8)))
+                + SheetFrame.viewTitle("\(storeyName) Electrical Plan", scale: scale, at: placed.fits ? under : titleAt)
         }
     }
 
