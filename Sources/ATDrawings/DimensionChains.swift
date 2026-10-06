@@ -74,4 +74,40 @@ enum DimensionChains {
                                           override: nil), style: style)
         }
     }
+
+    /// Clear interior width and depth of every box-shaped room, face to face, a quarter of the way in from
+    /// its south and west walls so they clear the room tag. Rooms that are not boxes get none.
+    static func interiorItems(document: ModelDocument, storey: StoreyID, view: ViewTransform) -> [DisplayItem] {
+        let walls = Dictionary(uniqueKeysWithValues: document.walls.map { ($0.id, $0) })
+        var items: [DisplayItem] = []
+        for room in document.rooms where room.storeyID == storey {
+            let boundary = room.boundaryWallIDs.compactMap { walls[$0] }
+            guard let clear = clearBox(boundary) else { continue }
+            let (x0, x1, y0, y1) = clear
+            let y = y0 + (y1 - y0) / 4, x = x0 + (x1 - x0) / 4
+            items.append(DisplayItem(.dimension(from: view.paper(paperPoint(x0, y)), to: view.paper(paperPoint(x1, y)),
+                                                offset: Length(ticks: 0), override: nil),
+                                     style: style, elementID: room.id.rawValue))
+            items.append(DisplayItem(.dimension(from: view.paper(paperPoint(x, y0)), to: view.paper(paperPoint(x, y1)),
+                                                offset: Length(ticks: 0), override: nil),
+                                     style: style, elementID: room.id.rawValue))
+        }
+        return items
+    }
+
+    /// Face-to-face box of a room bounded by axis-aligned walls, or nil.
+    static func clearBox(_ boundary: [Wall]) -> (Int64, Int64, Int64, Int64)? {
+        guard let corners = FloorPlanView.roomPolygon(boundary), corners.count == 4 else { return nil }
+        let xs = corners.map(\.x.ticks), ys = corners.map(\.y.ticks)
+        let (x0, x1, y0, y1) = (xs.min()!, xs.max()!, ys.min()!, ys.max()!)
+        guard corners.allSatisfy({ ($0.x.ticks == x0 || $0.x.ticks == x1) && ($0.y.ticks == y0 || $0.y.ticks == y1) })
+        else { return nil }
+        func half(_ match: (Wall) -> Bool) -> Int64 { (boundary.first(where: match)?.thickness.ticks ?? 0) / 2 }
+        let west = half { $0.start.x.ticks == x0 && $0.end.x.ticks == x0 }
+        let east = half { $0.start.x.ticks == x1 && $0.end.x.ticks == x1 }
+        let south = half { $0.start.y.ticks == y0 && $0.end.y.ticks == y0 }
+        let north = half { $0.start.y.ticks == y1 && $0.end.y.ticks == y1 }
+        guard x1 - east > x0 + west, y1 - north > y0 + south else { return nil }
+        return (x0 + west, x1 - east, y0 + south, y1 - north)
+    }
 }
