@@ -65,3 +65,13 @@ let package = Package(
         ),
     ]
 )
+
+#if os(macOS)
+package.targets.append(
+    .executableTarget(
+        name: "HestiaApp",
+        dependencies: ["ATContracts", "ATGeometry", "ATExchange", "ATDrawings"],
+        path: "Apps/Hestia/Sources/HestiaApp"
+    )
+)
+#endif
