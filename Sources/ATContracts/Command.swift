@@ -33,6 +33,18 @@ public enum CommandValidationError: Error, Sendable, Equatable {
     case hasDependents(UUID)
     /// The command name is not in the catalog.
     case unknownCommand(String)
+    /// The named parameter is outside its allowed range.
+    case invalidValue(parameter: String)
+    /// An outline needs at least three points, wound counterclockwise, enclosing some area.
+    case polygonInvalid
+    /// Only single and double hinged doors have a swing.
+    case swingNotAllowed(OpeningID)
+    case stairNotFound(StairID)
+    case roofNotFound(RoofID)
+    case slabNotFound(SlabID)
+    case sheetNotFound(SheetID)
+    /// Another sheet already uses this number.
+    case duplicateSheetNumber(String)
 }
 
 /// The JSON shape of one command parameter, so tool schemas can be generated from the catalog.
@@ -49,6 +61,14 @@ public enum CommandParameterKind: String, Sendable, Hashable, CaseIterable {
     case id
     /// An array of UUID strings.
     case idList
+    /// An array of `Point2` objects.
+    case point2List
+    /// A string from `CommandParameter.allowedValues`.
+    case choice
+    /// A JSON object whose shape the parameter description gives.
+    case object
+    /// An array of JSON objects whose shape the parameter description gives.
+    case objectList
 }
 
 /// One typed, documented command parameter. `name` is the JSON key.
@@ -57,12 +77,18 @@ public struct CommandParameter: Hashable, Sendable {
     public var kind: CommandParameterKind
     public var isRequired: Bool
     public var description: String
+    /// The allowed strings for a `.choice` parameter.
+    public var allowedValues: [String]?
 
-    public init(_ name: String, _ kind: CommandParameterKind, required: Bool = true, _ description: String) {
+    public init(
+        _ name: String, _ kind: CommandParameterKind, required: Bool = true, _ description: String,
+        allowedValues: [String]? = nil
+    ) {
         self.name = name
         self.kind = kind
         self.isRequired = required
         self.description = description
+        self.allowedValues = allowedValues
     }
 }
 
@@ -166,6 +192,20 @@ public enum CommandCatalog {
         RenameRoomCommand.self,
         SetRoomBoundaryCommand.self,
         RemoveRoomCommand.self,
+        SetOpeningKindCommand.self,
+        AddStairCommand.self,
+        MoveStairCommand.self,
+        SetStairRisersCommand.self,
+        RemoveStairCommand.self,
+        AddRoofCommand.self,
+        SetRoofEdgeCommand.self,
+        RemoveRoofCommand.self,
+        AddSlabCommand.self,
+        SetSlabOutlineCommand.self,
+        RemoveSlabCommand.self,
+        AddSheetCommand.self,
+        SetSheetTitleCommand.self,
+        RemoveSheetCommand.self,
     ]
 
     public static var descriptors: [CommandDescriptor] {

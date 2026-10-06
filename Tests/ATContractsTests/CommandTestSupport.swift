@@ -87,7 +87,7 @@ enum Sample {
     }
 
     /// One valid instance of every v1 command against `document()`.
-    static let commands: [AnyCommand] = core + buildingsAndStoreys + wallsAndOpenings + rooms
+    static let commands: [AnyCommand] = core + buildingsAndStoreys + wallsAndOpenings + rooms + alphaElements
 
     static let core: [AnyCommand] = [
         RenameProjectCommand(projectID: project, newName: "Renamed").erased,

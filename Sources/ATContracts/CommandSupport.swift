@@ -39,7 +39,47 @@ extension ModelDocument {
     }
 }
 
+extension ModelDocument {
+    func stairIndex(_ id: StairID) throws -> Int {
+        guard let index = stairs.firstIndex(where: { $0.id == id }) else {
+            throw CommandValidationError.stairNotFound(id)
+        }
+        return index
+    }
+
+    func roofIndex(_ id: RoofID) throws -> Int {
+        guard let index = roofs.firstIndex(where: { $0.id == id }) else {
+            throw CommandValidationError.roofNotFound(id)
+        }
+        return index
+    }
+
+    func slabIndex(_ id: SlabID) throws -> Int {
+        guard let index = slabs.firstIndex(where: { $0.id == id }) else {
+            throw CommandValidationError.slabNotFound(id)
+        }
+        return index
+    }
+
+    func sheetIndex(_ id: SheetID) throws -> Int {
+        guard let index = sheets.firstIndex(where: { $0.id == id }) else {
+            throw CommandValidationError.sheetNotFound(id)
+        }
+        return index
+    }
+}
+
 enum CommandCheck {
+    /// At least three points, counterclockwise, with positive area.
+    static func polygon(_ points: [Point2]) throws {
+        guard points.count >= 3 else { throw CommandValidationError.polygonInvalid }
+        var twiceArea: Int64 = 0
+        for (a, b) in zip(points, points.dropFirst() + points.prefix(1)) {
+            twiceArea += a.x.ticks * b.y.ticks - b.x.ticks * a.y.ticks
+        }
+        if twiceArea <= 0 { throw CommandValidationError.polygonInvalid }
+    }
+
     static func name(_ name: String) throws -> String {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { throw CommandValidationError.nameEmpty }
