@@ -184,6 +184,8 @@ public enum CommandCatalog {
         SetWallThicknessCommand.self,
         SetWallHeightCommand.self,
         RemoveWallCommand.self,
+        SetWallLayersCommand.self,
+        SetWallPhaseCommand.self,
         AddOpeningCommand.self,
         MoveOpeningCommand.self,
         ResizeOpeningCommand.self,

@@ -100,7 +100,12 @@ enum Sample {
 
 /// Expects `command` to be refused with `expected` by both validate and apply, leaving the sample unchanged.
 func expectRefused(_ expected: CommandValidationError, _ command: some Command) {
-    var document = Sample.document()
+    expectRefusedOn(Sample.document(), expected, command)
+}
+
+/// Expects `command` to be refused on `start` by both validate and apply, leaving it unchanged.
+func expectRefusedOn(_ start: ModelDocument, _ expected: CommandValidationError, _ command: some Command) {
+    var document = start
     let original = document
     #expect(throws: expected) { try command.validate(against: document) }
     #expect(throws: expected) { _ = try command.apply(to: &document) }
