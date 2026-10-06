@@ -170,26 +170,28 @@ public enum LengthFormatting {
         return totalSixtyFourths
     }
 
+    /// Whole millimeters, rounded to the nearest.
     private static func formatMetric(_ length: Length) -> String {
-        let mm = length.ticks / Length.ticksPerMillimeter
+        let half = Length.ticksPerMillimeter / 2
+        let mm = (length.ticks >= 0 ? length.ticks + half : length.ticks - half) / Length.ticksPerMillimeter
         return "\(mm) mm"
     }
 
+    /// Feet, inches, and a reduced fraction, rounded to the nearest 1/64": `6'-0"`, `3'-11 1/4"`, `-0'-0 3/64"`.
     private static func formatFeetInchesFractions(_ length: Length) -> String {
-        var remainder = length.ticks
-        let feet = remainder / (12 * ticksPerInch)
-        remainder -= feet * 12 * ticksPerInch
-        let inches = remainder / ticksPerInch
-        remainder -= inches * ticksPerInch
-        let sixtyFourths = remainder / Length.ticksPerSixtyFourthInch
-
-        if sixtyFourths == 0 {
-            return "\(feet)'-\(inches)\""
+        let sign = length.ticks < 0 ? "-" : ""
+        let sixtyFourths = (length.ticks.magnitude + UInt64(Length.ticksPerSixtyFourthInch / 2))
+            / UInt64(Length.ticksPerSixtyFourthInch)
+        let feet = sixtyFourths / (12 * 64)
+        let inches = (sixtyFourths % (12 * 64)) / 64
+        var numerator = sixtyFourths % 64
+        guard numerator > 0 else { return "\(sign)\(feet)'-\(inches)\"" }
+        var denominator: UInt64 = 64
+        while numerator % 2 == 0 {
+            numerator /= 2
+            denominator /= 2
         }
-        if inches == 0 && feet == 0 {
-            return "1/\(64 / sixtyFourths)"
-        }
-        return "\(feet)'-\(inches) \(sixtyFourths)/64\""
+        return "\(sign)\(feet)'-\(inches) \(numerator)/\(denominator)\""
     }
 
     private static func parsePositiveInteger(_ text: String) -> Int64? {
