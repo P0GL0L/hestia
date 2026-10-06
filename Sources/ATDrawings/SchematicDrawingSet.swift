@@ -52,23 +52,57 @@ public struct SchematicDrawingSet: DrawingGenerator {
         _ view: SheetView, in slot: PaperRect, sheet: Sheet, document: ModelDocument, geometry: any GeometryEngine
     ) throws -> [DisplayItem] {
         let titleAt = paperPoint(slot.minX, slot.minY - mmTicks(8))
+        let units = Self.units(document)
         switch view {
         case let .floorPlan(storeyID):
             let storeyName = document.storeys.first { $0.id == storeyID }?.name ?? "Floor"
             guard let extent = FloorPlanView.extent(of: document, storey: storeyID) else {
                 return SheetFrame.notGenerated("\(storeyName) plan has no walls", in: slot)
             }
-            let scale = sheet.scale ?? Self.fittingScale(extent: extent, in: slot)
-            let placed = ViewTransform.centering(modelMin: extent.min, modelMax: extent.max, in: slot, scale: scale)
+            // Leave room outside the plan for the dimension chains on the south and west.
+            let reserve = DimensionChains.reserve
+            let inner = PaperRect(minX: slot.minX + reserve, minY: slot.minY + reserve,
+                                  width: slot.width - reserve, height: slot.height - reserve)
+            let scale = sheet.scale ?? Self.fittingScale(extent: extent, in: inner)
+            let placed = ViewTransform.centering(modelMin: extent.min, modelMax: extent.max, in: inner, scale: scale)
             let outlines = try geometry.planView(of: document, storey: storeyID)
             let areas = try geometry.roomAreas(of: document, storey: storeyID)
-            let under = paperPoint(placed.transform.paperOrigin.x.ticks, placed.transform.paperOrigin.y.ticks - mmTicks(15))
+            let under = paperPoint(placed.transform.paperOrigin.x.ticks - reserve,
+                                   placed.transform.paperOrigin.y.ticks - reserve - mmTicks(8))
             return FloorPlanView.items(document: document, storey: storeyID, outlines: outlines, areas: areas,
                                        view: placed.transform)
+                + DimensionChains.items(document: document, storey: storeyID, view: placed.transform)
                 + SheetFrame.viewTitle("\(storeyName) Plan", scale: scale, at: placed.fits ? under : titleAt)
-        case .cover, .roofPlan, .sitePlan, .elevation, .section, .schedule, .electricalPlan:
+        case let .elevation(direction):
+            let name = Self.name(of: view)
+            guard let extent = ElevationView.extent(document, direction) else {
+                return SheetFrame.notGenerated(name, in: slot)
+            }
+            let scale = sheet.scale ?? Self.fittingScale(extent: extent, in: slot)
+            let placed = ViewTransform.centering(modelMin: extent.min, modelMax: extent.max, in: slot, scale: scale)
+            let under = paperPoint(placed.transform.paperOrigin.x.ticks,
+                                   placed.transform.paperOrigin.y.ticks - mmTicks(10))
+            return ElevationView.items(document, direction, view: placed.transform)
+                + SheetFrame.viewTitle(name, scale: scale, at: placed.fits ? under : titleAt)
+        case let .schedule(kind):
+            var areas: [RoomID: Area] = [:]
+            if kind == .areas {
+                for storey in document.storeys {
+                    areas.merge(try geometry.roomAreas(of: document, storey: storey.id)) { first, _ in first }
+                }
+            }
+            guard let table = ScheduleView.table(kind, document: document, style: units, areas: areas) else {
+                return SheetFrame.notGenerated(Self.name(of: view), in: slot)
+            }
+            return ScheduleView.items(table, at: paperPoint(slot.minX, slot.maxY - mmTicks(8)))
+        case .cover, .roofPlan, .sitePlan, .section, .electricalPlan:
             return SheetFrame.notGenerated(Self.name(of: view), in: slot)
         }
+    }
+
+    /// Imperial when any sheet uses an inch scale, metric otherwise.
+    static func units(_ document: ModelDocument) -> LengthFormatStyle {
+        document.sheets.contains { $0.scale?.label.contains("\"") == true } ? .feetInchesFractions : .metric
     }
 
     static func name(of view: SheetView) -> String {
