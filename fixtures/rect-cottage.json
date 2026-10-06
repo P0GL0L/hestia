@@ -436,6 +436,16 @@
           "elevation" : {
             "direction" : "north"
           }
+        },
+        {
+          "elevation" : {
+            "direction" : "east"
+          }
+        },
+        {
+          "elevation" : {
+            "direction" : "west"
+          }
         }
       ]
     },

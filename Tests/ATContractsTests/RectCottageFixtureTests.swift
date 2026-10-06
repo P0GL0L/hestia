@@ -91,7 +91,8 @@ enum RectCottage {
             AddSheetCommand(sheetID: SheetID(id(70)), number: "A-101", title: "Floor Plan", paper: .archD,
                             scale: .quarterInch, views: [.floorPlan(storeyID: storey)]).erased,
             AddSheetCommand(sheetID: SheetID(id(71)), number: "A-201", title: "Elevations", paper: .archD,
-                            scale: .quarterInch, views: [.elevation(direction: .south), .elevation(direction: .north)])
+                            scale: .quarterInch, views: [.elevation(direction: .south), .elevation(direction: .north),
+                                    .elevation(direction: .east), .elevation(direction: .west)])
                 .erased,
             AddSheetCommand(sheetID: SheetID(id(72)), number: "A-601", title: "Schedules", paper: .archD, scale: nil,
                             views: [.schedule(kind: .doors), .schedule(kind: .windows)]).erased,
@@ -134,4 +135,9 @@ enum RectCottage {
     #expect(roof.planes.allSatisfy { $0.pitchRisePer12 == .inches(6) })
     #expect(cottage.stairs.count == 1)
     #expect(cottage.openings.filter { $0.kind.isDoor }.count == 6)
+    let elevations = cottage.sheets.flatMap(\.views).compactMap { view -> ElevationDirection? in
+        if case let .elevation(direction) = view { return direction }
+        return nil
+    }
+    #expect(elevations == [.south, .north, .east, .west])
 }
