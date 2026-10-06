@@ -37,9 +37,11 @@ enum FloorPlanView {
                                      elementID: outline.elementID))
         }
         let walls = Dictionary(uniqueKeysWithValues: document.walls.map { ($0.id, $0) })
+        let marks = ScheduleView.marks(document)
         for opening in document.openings {
             guard let wall = walls[opening.wallID], wall.storeyID == storey else { continue }
             items += symbol(for: opening, in: wall, view: view)
+            if let mark = marks[opening.id] { items.append(tag(mark, for: opening, in: wall, view: view)) }
         }
         let imperial = view.scale.label.contains("\"")
         for room in document.rooms where room.storeyID == storey {
@@ -140,6 +142,22 @@ enum FloorPlanView {
                  start: angle(leafAngle), sweep: angle(sweep)),
             style: DisplayStyle(layer: "A-DOOR", pen: .extraFine), elementID: id))
         return items
+    }
+
+    /// The schedule mark, set just outside the wall's right face at the opening's middle.
+    static func tag(_ mark: String, for opening: Opening, in wall: Wall, view: ViewTransform) -> DisplayItem {
+        let sx = Double(wall.start.x.ticks), sy = Double(wall.start.y.ticks)
+        let dx = Double(wall.end.x.ticks) - sx, dy = Double(wall.end.y.ticks) - sy
+        let length = max((dx * dx + dy * dy).squareRoot(), 1)
+        let (ux, uy) = (dx / length, dy / length)
+        let along = Double(opening.offsetAlongWall.ticks + opening.width.ticks / 2)
+        let across = -(Double(wall.thickness.ticks) / 2
+            + Double(mmTicks(4) * view.scale.modelUnitsPerPaperUnit))
+        let anchor = view.paper(paperPoint(Int64((sx + ux * along + uy * -across).rounded()),
+                                           Int64((sy + uy * along - ux * -across).rounded())))
+        return DisplayItem(.text(position: Point2(x: anchor.x, y: Length(ticks: anchor.y.ticks - mmTicks(1))),
+                                 string: mark, height: .millimeters(2), rotation: .degrees(0), alignment: .center),
+                           style: DisplayStyle(layer: "A-ANNO-TEXT", pen: .fine), elementID: opening.id.rawValue)
     }
 
     static func angle(_ radians: Double) -> Angle {

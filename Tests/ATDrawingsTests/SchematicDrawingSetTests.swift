@@ -61,8 +61,8 @@ private func strings(_ sheet: SheetDrawing) -> [String] {
         #expect(bounds.min.x.ticks >= 0 && bounds.min.y.ticks >= 0)
         #expect(bounds.max.x <= sheet.paper.width && bounds.max.y <= sheet.paper.height)
     }
-    // Views this slice does not draw yet say so instead of printing blank.
-    #expect(strings(sheets[1]).contains("South elevation: not generated in this version"))
+    #expect(strings(sheets[1]).contains("SOUTH ELEVATION"))
+    #expect(strings(sheets[2]).contains("DOOR SCHEDULE"))
 }
 
 @Test func cottagePlanDrawsWallsOpeningsAndRoomTags() throws {
