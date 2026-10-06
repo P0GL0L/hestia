@@ -10,6 +10,11 @@ extension Sample {
         SetWallThicknessCommand(wallID: wallSouth, thickness: .millimeters(300)).erased,
         SetWallHeightCommand(wallID: wallSouth, height: .millimeters(3000)).erased,
         RemoveWallCommand(wallID: wallSpare).erased,
+        SetWallLayersCommand(wallID: wallSouth, layers: [
+            WallLayer(material: "Plaster", function: .finish, thickness: .millimeters(20)),
+            WallLayer(material: "Brick", function: .structure, thickness: .millimeters(220)),
+        ]).erased,
+        SetWallPhaseCommand(wallID: wallSouth, phase: .existing).erased,
         AddOpeningCommand(openingID: newWindow, wallID: wallSouth, offsetAlongWall: .millimeters(2000),
                           width: .millimeters(1000), height: .millimeters(1200),
                           sillHeight: .millimeters(900), index: 0).erased,
@@ -102,4 +107,25 @@ extension Sample {
     )
     _ = try document.perform(inverse)
     #expect(try document.encodeToJSONData() == original.encodeToJSONData())
+}
+
+@Test func wallLayersSetTheThickness() throws {
+    var document = Sample.document()
+    let layers = [WallLayer(material: "Gypsum", function: .finish, thickness: .millimeters(13)),
+                  WallLayer(material: "Studs", function: .structure, thickness: .millimeters(90))]
+    _ = try document.perform(SetWallLayersCommand(wallID: Sample.wallSouth, layers: layers).erased)
+    #expect(document.walls[0].thickness == .millimeters(103))
+    expectRefusedOn(document, .invalidValue(parameter: "thickness"),
+                    SetWallThicknessCommand(wallID: Sample.wallSouth, thickness: .millimeters(200)))
+    expectRefused(.invalidValue(parameter: "layers"), AddWallCommand(
+        wallID: Sample.newWall, storeyID: Sample.storey, start: Sample.point(0, 0), end: Sample.point(1, 0),
+        thickness: .millimeters(200), height: .millimeters(2400), layers: layers
+    ))
+}
+
+@Test func wallsWithoutLayersOrPhaseStillDecode() throws {
+    let json = Data(#"{"id": "00000000-0000-4000-8000-000000000020", "storeyID": "00000000-0000-4000-8000-000000000010", "start": {"x": {"ticks": 0}, "y": {"ticks": 0}}, "end": {"x": {"ticks": 1}, "y": {"ticks": 0}}, "thickness": {"ticks": 5}, "height": {"ticks": 9}}"#.utf8)
+    let wall = try JSONDecoder().decode(Wall.self, from: json)
+    #expect(wall.layers.isEmpty)
+    #expect(wall.phase == .new)
 }

@@ -8,11 +8,13 @@ public struct AddWallCommand: Command {
     public var end: Point2
     public var thickness: Length
     public var height: Length
+    public var layers: [WallLayer]?
+    public var phase: WallPhase?
     public var index: Int?
 
     public init(
         wallID: WallID, storeyID: StoreyID, start: Point2, end: Point2,
-        thickness: Length, height: Length, index: Int? = nil
+        thickness: Length, height: Length, layers: [WallLayer]? = nil, phase: WallPhase? = nil, index: Int? = nil
     ) {
         self.wallID = wallID
         self.storeyID = storeyID
@@ -20,6 +22,8 @@ public struct AddWallCommand: Command {
         self.end = end
         self.thickness = thickness
         self.height = height
+        self.layers = layers
+        self.phase = phase
         self.index = index
     }
 
@@ -33,6 +37,9 @@ public struct AddWallCommand: Command {
         CommandParameter("end", .point2, "Centerline end point in plan; must differ from start."),
         CommandParameter("thickness", .length, "Total wall thickness; greater than zero."),
         CommandParameter("height", .length, "Wall height above the storey floor; greater than zero."),
+        wallLayersParameter,
+        CommandParameter("phase", .choice, required: false, "Renovation phase; omit for new.",
+                         allowedValues: WallPhase.allCases.map(\.rawValue)),
         insertIndexParameter,
     ]
 
@@ -42,12 +49,14 @@ public struct AddWallCommand: Command {
         if start == end { throw CommandValidationError.zeroLengthWall }
         try CommandCheck.positive(thickness, "thickness")
         try CommandCheck.positive(height, "height")
+        if let layers { try WallCheck.layers(layers, total: thickness) }
         try CommandCheck.insertionIndex(index, count: document.walls.count)
     }
 
     public func apply(to document: inout ModelDocument) throws -> AnyCommand {
         try validate(against: document)
-        let wall = Wall(id: wallID, storeyID: storeyID, start: start, end: end, thickness: thickness, height: height)
+        let wall = Wall(id: wallID, storeyID: storeyID, start: start, end: end, thickness: thickness, height: height,
+                        layers: layers ?? [], phase: phase ?? .new)
         document.walls.insert(wall, atOptional: index)
         return RemoveWallCommand(wallID: wallID).erased
     }
@@ -103,15 +112,17 @@ public struct SetWallThicknessCommand: Command {
     }
 
     public static let commandName = "set_wall_thickness"
-    public static let toolDescription = "Set the total thickness of an existing wall, centered on its centerline."
+    public static let toolDescription =
+        "Set the total thickness of a homogeneous wall, centered on its centerline; layered walls use set_wall_layers."
     public static let parameters = [
         CommandParameter("wallID", .id, "ID of the wall."),
         CommandParameter("thickness", .length, "New total thickness; greater than zero."),
     ]
 
     public func validate(against document: ModelDocument) throws {
-        _ = try document.wallIndex(wallID)
+        let wall = document.walls[try document.wallIndex(wallID)]
         try CommandCheck.positive(thickness, "thickness")
+        if !wall.layers.isEmpty { throw CommandValidationError.invalidValue(parameter: "thickness") }
     }
 
     public func apply(to document: inout ModelDocument) throws -> AnyCommand {
@@ -186,7 +197,99 @@ public struct RemoveWallCommand: Command {
         let removed = document.walls.remove(at: index)
         return AddWallCommand(
             wallID: removed.id, storeyID: removed.storeyID, start: removed.start, end: removed.end,
-            thickness: removed.thickness, height: removed.height, index: index
+            thickness: removed.thickness, height: removed.height, layers: removed.layers, phase: removed.phase,
+            index: index
         ).erased
+    }
+}
+
+/// Replaces a wall's layer build-up; the wall thickness becomes the sum of the layers.
+public struct SetWallLayersCommand: Command {
+    public var wallID: WallID
+    public var layers: [WallLayer]
+    /// Thickness to keep when `layers` is empty; ignored otherwise. Undo uses it.
+    public var thickness: Length?
+
+    public init(wallID: WallID, layers: [WallLayer], thickness: Length? = nil) {
+        self.wallID = wallID
+        self.layers = layers
+        self.thickness = thickness
+    }
+
+    var resolvedThickness: Length? {
+        layers.isEmpty ? thickness : Length(ticks: layers.reduce(0) { $0 + $1.thickness.ticks })
+    }
+
+    public static let commandName = "set_wall_layers"
+    public static let toolDescription =
+        "Set a wall's layer build-up, such as gypsum, studs, and siding; the wall thickness becomes their sum."
+    public static let parameters = [
+        CommandParameter("wallID", .id, "ID of the wall."),
+        CommandParameter("layers", .objectList,
+                         "Layers from the wall's left face to its right face, looking from start to end, each "
+                            + "{\"material\", \"function\", \"thickness\": Length}; empty for a homogeneous wall."),
+        CommandParameter("thickness", .length, required: false, "Thickness to use when layers is empty."),
+    ]
+
+    public func validate(against document: ModelDocument) throws {
+        _ = try document.wallIndex(wallID)
+        try WallCheck.layers(layers, total: nil)
+        if let resolvedThickness { try CommandCheck.positive(resolvedThickness, "thickness") }
+    }
+
+    public func apply(to document: inout ModelDocument) throws -> AnyCommand {
+        try validate(against: document)
+        let index = try document.wallIndex(wallID)
+        let previous = document.walls[index]
+        document.walls[index].layers = layers
+        if let resolvedThickness { document.walls[index].thickness = resolvedThickness }
+        return SetWallLayersCommand(wallID: wallID, layers: previous.layers, thickness: previous.thickness).erased
+    }
+}
+
+/// Sets a wall's renovation phase.
+public struct SetWallPhaseCommand: Command {
+    public var wallID: WallID
+    public var phase: WallPhase
+
+    public init(wallID: WallID, phase: WallPhase) {
+        self.wallID = wallID
+        self.phase = phase
+    }
+
+    public static let commandName = "set_wall_phase"
+    public static let toolDescription = "Mark a wall as new, existing, or to be demolished."
+    public static let parameters = [
+        CommandParameter("wallID", .id, "ID of the wall."),
+        CommandParameter("phase", .choice, "Renovation phase.", allowedValues: WallPhase.allCases.map(\.rawValue)),
+    ]
+
+    public func validate(against document: ModelDocument) throws {
+        _ = try document.wallIndex(wallID)
+    }
+
+    public func apply(to document: inout ModelDocument) throws -> AnyCommand {
+        let index = try document.wallIndex(wallID)
+        let previous = document.walls[index].phase
+        document.walls[index].phase = phase
+        return SetWallPhaseCommand(wallID: wallID, phase: previous).erased
+    }
+}
+
+let wallLayersParameter = CommandParameter(
+    "layers", .objectList, required: false,
+    "Optional build-up from left face to right face, each {\"material\", \"function\", \"thickness\": Length}; "
+        + "thicknesses must add up to the wall thickness."
+)
+
+enum WallCheck {
+    static func layers(_ layers: [WallLayer], total: Length?) throws {
+        for layer in layers {
+            _ = try CommandCheck.name(layer.material)
+            try CommandCheck.positive(layer.thickness, "layers")
+        }
+        if let total, !layers.isEmpty, layers.reduce(0, { $0 + $1.thickness.ticks }) != total.ticks {
+            throw CommandValidationError.invalidValue(parameter: "layers")
+        }
     }
 }

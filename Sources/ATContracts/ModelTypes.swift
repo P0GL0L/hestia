@@ -43,6 +43,10 @@ public struct Wall: Hashable, Codable, Sendable {
     public var end: Point2
     public var thickness: Length
     public var height: Length
+    /// Build-up from the left face to the right face, looking from start to end. Empty means one homogeneous
+    /// layer. When present, the layer thicknesses add up to `thickness`.
+    public var layers: [WallLayer]
+    public var phase: WallPhase
 
     public init(
         id: WallID,
@@ -50,7 +54,9 @@ public struct Wall: Hashable, Codable, Sendable {
         start: Point2,
         end: Point2,
         thickness: Length,
-        height: Length
+        height: Length,
+        layers: [WallLayer] = [],
+        phase: WallPhase = .new
     ) {
         self.id = id
         self.storeyID = storeyID
@@ -58,7 +64,51 @@ public struct Wall: Hashable, Codable, Sendable {
         self.end = end
         self.thickness = thickness
         self.height = height
+        self.layers = layers
+        self.phase = phase
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, storeyID, start, end, thickness, height, layers, phase
+    }
+
+    /// Files written before layers and phase existed open as a homogeneous new wall.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try c.decode(WallID.self, forKey: .id),
+            storeyID: try c.decode(StoreyID.self, forKey: .storeyID),
+            start: try c.decode(Point2.self, forKey: .start),
+            end: try c.decode(Point2.self, forKey: .end),
+            thickness: try c.decode(Length.self, forKey: .thickness),
+            height: try c.decode(Length.self, forKey: .height),
+            layers: try c.decodeIfPresent([WallLayer].self, forKey: .layers) ?? [],
+            phase: try c.decodeIfPresent(WallPhase.self, forKey: .phase) ?? .new
+        )
+    }
+}
+
+/// What a wall layer does, for hatching and schedules.
+public enum WallLayerFunction: String, Codable, Hashable, Sendable, CaseIterable {
+    case finish, structure, insulation, sheathing, airGap, cladding
+}
+
+/// One layer of a wall build-up, such as 1/2" gypsum board.
+public struct WallLayer: Hashable, Codable, Sendable {
+    public var material: String
+    public var function: WallLayerFunction
+    public var thickness: Length
+
+    public init(material: String, function: WallLayerFunction, thickness: Length) {
+        self.material = material
+        self.function = function
+        self.thickness = thickness
+    }
+}
+
+/// Renovation phase: existing walls stay, new walls are built, demolished walls are shown dashed.
+public enum WallPhase: String, Codable, Hashable, Sendable, CaseIterable {
+    case new, existing, demolish
 }
 
 public struct Opening: Hashable, Codable, Sendable {

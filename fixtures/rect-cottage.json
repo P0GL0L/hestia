@@ -1,119 +1,857 @@
 {
   "buildings" : [
     {
-      "id" : "00000000-0000-4000-8000-000000000002",
-      "name" : "Main Cottage",
-      "projectID" : "00000000-0000-4000-8000-000000000001"
+      "id" : "00000000-0000-4000-8000-000000002001",
+      "name" : "Cottage",
+      "projectID" : "00000000-0000-4000-8000-000000002000"
     }
   ],
   "openings" : [
     {
       "height" : {
-        "ticks" : 2438400
+        "ticks" : 650240
       },
-      "id" : "00000000-0000-4000-8000-000000000006",
+      "id" : "00000000-0000-4000-8000-000000002040",
       "kind" : "singleDoor",
       "offsetAlongWall" : {
-        "ticks" : 1463040
+        "ticks" : 487680
       },
       "sillHeight" : {
         "ticks" : 0
       },
-      "wallID" : "00000000-0000-4000-8000-000000000005",
+      "swing" : {
+        "hinge" : "nearStart",
+        "opensToward" : "left"
+      },
+      "wallID" : "00000000-0000-4000-8000-000000002011",
       "width" : {
-        "ticks" : 914400
+        "ticks" : 292608
+      }
+    },
+    {
+      "height" : {
+        "ticks" : 390144
+      },
+      "id" : "00000000-0000-4000-8000-000000002041",
+      "kind" : "window",
+      "offsetAlongWall" : {
+        "ticks" : 1755648
+      },
+      "sillHeight" : {
+        "ticks" : 292608
+      },
+      "wallID" : "00000000-0000-4000-8000-000000002011",
+      "width" : {
+        "ticks" : 390144
+      }
+    },
+    {
+      "height" : {
+        "ticks" : 650240
+      },
+      "id" : "00000000-0000-4000-8000-000000002042",
+      "kind" : "singleDoor",
+      "offsetAlongWall" : {
+        "ticks" : 292608
+      },
+      "sillHeight" : {
+        "ticks" : 0
+      },
+      "swing" : {
+        "hinge" : "nearStart",
+        "opensToward" : "left"
+      },
+      "wallID" : "00000000-0000-4000-8000-000000002012",
+      "width" : {
+        "ticks" : 292608
+      }
+    },
+    {
+      "height" : {
+        "ticks" : 390144
+      },
+      "id" : "00000000-0000-4000-8000-000000002043",
+      "kind" : "window",
+      "offsetAlongWall" : {
+        "ticks" : 1560576
+      },
+      "sillHeight" : {
+        "ticks" : 292608
+      },
+      "wallID" : "00000000-0000-4000-8000-000000002012",
+      "width" : {
+        "ticks" : 390144
+      }
+    },
+    {
+      "height" : {
+        "ticks" : 390144
+      },
+      "id" : "00000000-0000-4000-8000-000000002044",
+      "kind" : "window",
+      "offsetAlongWall" : {
+        "ticks" : 2755392
+      },
+      "sillHeight" : {
+        "ticks" : 292608
+      },
+      "wallID" : "00000000-0000-4000-8000-000000002013",
+      "width" : {
+        "ticks" : 390144
+      }
+    },
+    {
+      "height" : {
+        "ticks" : 195072
+      },
+      "id" : "00000000-0000-4000-8000-000000002045",
+      "kind" : "window",
+      "offsetAlongWall" : {
+        "ticks" : 1780032
+      },
+      "sillHeight" : {
+        "ticks" : 438912
+      },
+      "wallID" : "00000000-0000-4000-8000-000000002013",
+      "width" : {
+        "ticks" : 195072
+      }
+    },
+    {
+      "height" : {
+        "ticks" : 390144
+      },
+      "id" : "00000000-0000-4000-8000-000000002046",
+      "kind" : "window",
+      "offsetAlongWall" : {
+        "ticks" : 1463040
+      },
+      "sillHeight" : {
+        "ticks" : 292608
+      },
+      "wallID" : "00000000-0000-4000-8000-000000002014",
+      "width" : {
+        "ticks" : 390144
+      }
+    },
+    {
+      "height" : {
+        "ticks" : 650240
+      },
+      "id" : "00000000-0000-4000-8000-000000002047",
+      "kind" : "singleDoor",
+      "offsetAlongWall" : {
+        "ticks" : 292608
+      },
+      "sillHeight" : {
+        "ticks" : 0
+      },
+      "swing" : {
+        "hinge" : "nearStart",
+        "opensToward" : "left"
+      },
+      "wallID" : "00000000-0000-4000-8000-000000002015",
+      "width" : {
+        "ticks" : 260096
+      }
+    },
+    {
+      "height" : {
+        "ticks" : 650240
+      },
+      "id" : "00000000-0000-4000-8000-000000002048",
+      "kind" : "singleDoor",
+      "offsetAlongWall" : {
+        "ticks" : 390144
+      },
+      "sillHeight" : {
+        "ticks" : 0
+      },
+      "swing" : {
+        "hinge" : "nearStart",
+        "opensToward" : "left"
+      },
+      "wallID" : "00000000-0000-4000-8000-000000002017",
+      "width" : {
+        "ticks" : 260096
+      }
+    },
+    {
+      "height" : {
+        "ticks" : 650240
+      },
+      "id" : "00000000-0000-4000-8000-000000002049",
+      "kind" : "pocketDoor",
+      "offsetAlongWall" : {
+        "ticks" : 1755648
+      },
+      "sillHeight" : {
+        "ticks" : 0
+      },
+      "wallID" : "00000000-0000-4000-8000-000000002017",
+      "width" : {
+        "ticks" : 260096
+      }
+    },
+    {
+      "height" : {
+        "ticks" : 650240
+      },
+      "id" : "00000000-0000-4000-8000-000000002050",
+      "kind" : "singleDoor",
+      "offsetAlongWall" : {
+        "ticks" : 2926080
+      },
+      "sillHeight" : {
+        "ticks" : 0
+      },
+      "swing" : {
+        "hinge" : "nearStart",
+        "opensToward" : "left"
+      },
+      "wallID" : "00000000-0000-4000-8000-000000002017",
+      "width" : {
+        "ticks" : 260096
       }
     }
   ],
   "project" : {
-    "id" : "00000000-0000-4000-8000-000000000001",
+    "id" : "00000000-0000-4000-8000-000000002000",
     "name" : "Rect Cottage"
   },
   "roofs" : [
-
+    {
+      "eaveHeight" : {
+        "ticks" : 780288
+      },
+      "footprint" : [
+        {
+          "x" : {
+            "ticks" : -24384
+          },
+          "y" : {
+            "ticks" : -24384
+          }
+        },
+        {
+          "x" : {
+            "ticks" : 3633216
+          },
+          "y" : {
+            "ticks" : -24384
+          }
+        },
+        {
+          "x" : {
+            "ticks" : 3633216
+          },
+          "y" : {
+            "ticks" : 2218944
+          }
+        },
+        {
+          "x" : {
+            "ticks" : -24384
+          },
+          "y" : {
+            "ticks" : 2218944
+          }
+        }
+      ],
+      "id" : "00000000-0000-4000-8000-000000002062",
+      "planes" : [
+        {
+          "overhang" : {
+            "ticks" : 97536
+          },
+          "pitchRisePer12" : {
+            "ticks" : 48768
+          }
+        },
+        {
+          "overhang" : {
+            "ticks" : 97536
+          },
+          "pitchRisePer12" : {
+            "ticks" : 48768
+          }
+        },
+        {
+          "overhang" : {
+            "ticks" : 97536
+          },
+          "pitchRisePer12" : {
+            "ticks" : 48768
+          }
+        },
+        {
+          "overhang" : {
+            "ticks" : 97536
+          },
+          "pitchRisePer12" : {
+            "ticks" : 48768
+          }
+        }
+      ],
+      "storeyID" : "00000000-0000-4000-8000-000000002002"
+    }
   ],
   "rooms" : [
     {
       "boundaryWallIDs" : [
-        "00000000-0000-4000-8000-000000000005",
-        "00000000-0000-4000-8000-000000000007"
+        "00000000-0000-4000-8000-000000002011",
+        "00000000-0000-4000-8000-000000002015",
+        "00000000-0000-4000-8000-000000002017",
+        "00000000-0000-4000-8000-000000002014"
       ],
-      "id" : "00000000-0000-4000-8000-000000000008",
+      "id" : "00000000-0000-4000-8000-000000002030",
       "name" : "Living",
-      "storeyID" : "00000000-0000-4000-8000-000000000003"
+      "storeyID" : "00000000-0000-4000-8000-000000002002"
+    },
+    {
+      "boundaryWallIDs" : [
+        "00000000-0000-4000-8000-000000002011",
+        "00000000-0000-4000-8000-000000002016",
+        "00000000-0000-4000-8000-000000002017",
+        "00000000-0000-4000-8000-000000002015"
+      ],
+      "id" : "00000000-0000-4000-8000-000000002031",
+      "name" : "Kitchen",
+      "storeyID" : "00000000-0000-4000-8000-000000002002"
+    },
+    {
+      "boundaryWallIDs" : [
+        "00000000-0000-4000-8000-000000002011",
+        "00000000-0000-4000-8000-000000002012",
+        "00000000-0000-4000-8000-000000002017",
+        "00000000-0000-4000-8000-000000002016"
+      ],
+      "id" : "00000000-0000-4000-8000-000000002032",
+      "name" : "Utility",
+      "storeyID" : "00000000-0000-4000-8000-000000002002"
+    },
+    {
+      "boundaryWallIDs" : [
+        "00000000-0000-4000-8000-000000002017",
+        "00000000-0000-4000-8000-000000002015",
+        "00000000-0000-4000-8000-000000002013",
+        "00000000-0000-4000-8000-000000002014"
+      ],
+      "id" : "00000000-0000-4000-8000-000000002033",
+      "name" : "Bedroom",
+      "storeyID" : "00000000-0000-4000-8000-000000002002"
+    },
+    {
+      "boundaryWallIDs" : [
+        "00000000-0000-4000-8000-000000002017",
+        "00000000-0000-4000-8000-000000002016",
+        "00000000-0000-4000-8000-000000002013",
+        "00000000-0000-4000-8000-000000002015"
+      ],
+      "id" : "00000000-0000-4000-8000-000000002034",
+      "name" : "Bath",
+      "storeyID" : "00000000-0000-4000-8000-000000002002"
+    },
+    {
+      "boundaryWallIDs" : [
+        "00000000-0000-4000-8000-000000002017",
+        "00000000-0000-4000-8000-000000002012",
+        "00000000-0000-4000-8000-000000002013",
+        "00000000-0000-4000-8000-000000002016"
+      ],
+      "id" : "00000000-0000-4000-8000-000000002035",
+      "name" : "Bedroom 2",
+      "storeyID" : "00000000-0000-4000-8000-000000002002"
     }
   ],
   "schemaVersion" : 1,
   "sheets" : [
-
+    {
+      "id" : "00000000-0000-4000-8000-000000002070",
+      "number" : "A-101",
+      "paper" : {
+        "height" : {
+          "ticks" : 195072
+        },
+        "name" : "ARCH D",
+        "width" : {
+          "ticks" : 292608
+        }
+      },
+      "scale" : {
+        "label" : "1\/4\" = 1'-0\"",
+        "modelUnitsPerPaperUnit" : 48
+      },
+      "title" : "Floor Plan",
+      "views" : [
+        {
+          "floorPlan" : {
+            "storeyID" : "00000000-0000-4000-8000-000000002002"
+          }
+        }
+      ]
+    },
+    {
+      "id" : "00000000-0000-4000-8000-000000002071",
+      "number" : "A-201",
+      "paper" : {
+        "height" : {
+          "ticks" : 195072
+        },
+        "name" : "ARCH D",
+        "width" : {
+          "ticks" : 292608
+        }
+      },
+      "scale" : {
+        "label" : "1\/4\" = 1'-0\"",
+        "modelUnitsPerPaperUnit" : 48
+      },
+      "title" : "Elevations",
+      "views" : [
+        {
+          "elevation" : {
+            "direction" : "south"
+          }
+        },
+        {
+          "elevation" : {
+            "direction" : "north"
+          }
+        }
+      ]
+    },
+    {
+      "id" : "00000000-0000-4000-8000-000000002072",
+      "number" : "A-601",
+      "paper" : {
+        "height" : {
+          "ticks" : 195072
+        },
+        "name" : "ARCH D",
+        "width" : {
+          "ticks" : 292608
+        }
+      },
+      "title" : "Schedules",
+      "views" : [
+        {
+          "schedule" : {
+            "kind" : "doors"
+          }
+        },
+        {
+          "schedule" : {
+            "kind" : "windows"
+          }
+        }
+      ]
+    }
   ],
   "slabs" : [
-
+    {
+      "id" : "00000000-0000-4000-8000-000000002060",
+      "kind" : "foundation",
+      "outline" : [
+        {
+          "x" : {
+            "ticks" : -48768
+          },
+          "y" : {
+            "ticks" : -48768
+          }
+        },
+        {
+          "x" : {
+            "ticks" : 3657600
+          },
+          "y" : {
+            "ticks" : -48768
+          }
+        },
+        {
+          "x" : {
+            "ticks" : 3657600
+          },
+          "y" : {
+            "ticks" : 2243328
+          }
+        },
+        {
+          "x" : {
+            "ticks" : -48768
+          },
+          "y" : {
+            "ticks" : 2243328
+          }
+        }
+      ],
+      "storeyID" : "00000000-0000-4000-8000-000000002002",
+      "thickness" : {
+        "ticks" : 32512
+      },
+      "topOffset" : {
+        "ticks" : 0
+      }
+    }
   ],
   "stairs" : [
-
+    {
+      "id" : "00000000-0000-4000-8000-000000002061",
+      "kind" : "straight",
+      "riserCount" : 12,
+      "riserHeight" : {
+        "ticks" : 65024
+      },
+      "runEnd" : {
+        "x" : {
+          "ticks" : 2633472
+        },
+        "y" : {
+          "ticks" : 991616
+        }
+      },
+      "runStart" : {
+        "x" : {
+          "ticks" : 2633472
+        },
+        "y" : {
+          "ticks" : 97536
+        }
+      },
+      "storeyID" : "00000000-0000-4000-8000-000000002002",
+      "width" : {
+        "ticks" : 292608
+      }
+    }
   ],
   "storeys" : [
     {
-      "buildingID" : "00000000-0000-4000-8000-000000000002",
+      "buildingID" : "00000000-0000-4000-8000-000000002001",
       "elevation" : {
         "ticks" : 0
       },
-      "id" : "00000000-0000-4000-8000-000000000003",
-      "name" : "Ground"
+      "id" : "00000000-0000-4000-8000-000000002002",
+      "name" : "Ground Floor"
     }
   ],
   "walls" : [
     {
       "end" : {
         "x" : {
-          "ticks" : 9753600
+          "ticks" : 3633216
         },
         "y" : {
-          "ticks" : 0
+          "ticks" : -24384
         }
       },
       "height" : {
-        "ticks" : 3048000
+        "ticks" : 780288
       },
-      "id" : "00000000-0000-4000-8000-000000000005",
+      "id" : "00000000-0000-4000-8000-000000002011",
+      "layers" : [
+        {
+          "function" : "finish",
+          "material" : "Gypsum board",
+          "thickness" : {
+            "ticks" : 4064
+          }
+        },
+        {
+          "function" : "structure",
+          "material" : "2x4 studs with batt insulation",
+          "thickness" : {
+            "ticks" : 28448
+          }
+        },
+        {
+          "function" : "sheathing",
+          "material" : "OSB sheathing",
+          "thickness" : {
+            "ticks" : 4064
+          }
+        },
+        {
+          "function" : "cladding",
+          "material" : "Lap siding on furring",
+          "thickness" : {
+            "ticks" : 12192
+          }
+        }
+      ],
+      "phase" : "new",
       "start" : {
         "x" : {
-          "ticks" : 0
+          "ticks" : -24384
         },
         "y" : {
-          "ticks" : 0
+          "ticks" : -24384
         }
       },
-      "storeyID" : "00000000-0000-4000-8000-000000000003",
+      "storeyID" : "00000000-0000-4000-8000-000000002002",
       "thickness" : {
-        "ticks" : 50800
+        "ticks" : 48768
       }
     },
     {
       "end" : {
         "x" : {
-          "ticks" : 9753600
+          "ticks" : 3633216
         },
         "y" : {
-          "ticks" : 7315200
+          "ticks" : 2218944
         }
       },
       "height" : {
-        "ticks" : 3048000
+        "ticks" : 780288
       },
-      "id" : "00000000-0000-4000-8000-000000000007",
+      "id" : "00000000-0000-4000-8000-000000002012",
+      "layers" : [
+        {
+          "function" : "finish",
+          "material" : "Gypsum board",
+          "thickness" : {
+            "ticks" : 4064
+          }
+        },
+        {
+          "function" : "structure",
+          "material" : "2x4 studs with batt insulation",
+          "thickness" : {
+            "ticks" : 28448
+          }
+        },
+        {
+          "function" : "sheathing",
+          "material" : "OSB sheathing",
+          "thickness" : {
+            "ticks" : 4064
+          }
+        },
+        {
+          "function" : "cladding",
+          "material" : "Lap siding on furring",
+          "thickness" : {
+            "ticks" : 12192
+          }
+        }
+      ],
+      "phase" : "new",
       "start" : {
         "x" : {
-          "ticks" : 9753600
+          "ticks" : 3633216
         },
         "y" : {
-          "ticks" : 0
+          "ticks" : -24384
         }
       },
-      "storeyID" : "00000000-0000-4000-8000-000000000003",
+      "storeyID" : "00000000-0000-4000-8000-000000002002",
       "thickness" : {
-        "ticks" : 50800
+        "ticks" : 48768
+      }
+    },
+    {
+      "end" : {
+        "x" : {
+          "ticks" : -24384
+        },
+        "y" : {
+          "ticks" : 2218944
+        }
+      },
+      "height" : {
+        "ticks" : 780288
+      },
+      "id" : "00000000-0000-4000-8000-000000002013",
+      "layers" : [
+        {
+          "function" : "finish",
+          "material" : "Gypsum board",
+          "thickness" : {
+            "ticks" : 4064
+          }
+        },
+        {
+          "function" : "structure",
+          "material" : "2x4 studs with batt insulation",
+          "thickness" : {
+            "ticks" : 28448
+          }
+        },
+        {
+          "function" : "sheathing",
+          "material" : "OSB sheathing",
+          "thickness" : {
+            "ticks" : 4064
+          }
+        },
+        {
+          "function" : "cladding",
+          "material" : "Lap siding on furring",
+          "thickness" : {
+            "ticks" : 12192
+          }
+        }
+      ],
+      "phase" : "new",
+      "start" : {
+        "x" : {
+          "ticks" : 3633216
+        },
+        "y" : {
+          "ticks" : 2218944
+        }
+      },
+      "storeyID" : "00000000-0000-4000-8000-000000002002",
+      "thickness" : {
+        "ticks" : 48768
+      }
+    },
+    {
+      "end" : {
+        "x" : {
+          "ticks" : -24384
+        },
+        "y" : {
+          "ticks" : -24384
+        }
+      },
+      "height" : {
+        "ticks" : 780288
+      },
+      "id" : "00000000-0000-4000-8000-000000002014",
+      "layers" : [
+        {
+          "function" : "finish",
+          "material" : "Gypsum board",
+          "thickness" : {
+            "ticks" : 4064
+          }
+        },
+        {
+          "function" : "structure",
+          "material" : "2x4 studs with batt insulation",
+          "thickness" : {
+            "ticks" : 28448
+          }
+        },
+        {
+          "function" : "sheathing",
+          "material" : "OSB sheathing",
+          "thickness" : {
+            "ticks" : 4064
+          }
+        },
+        {
+          "function" : "cladding",
+          "material" : "Lap siding on furring",
+          "thickness" : {
+            "ticks" : 12192
+          }
+        }
+      ],
+      "phase" : "new",
+      "start" : {
+        "x" : {
+          "ticks" : -24384
+        },
+        "y" : {
+          "ticks" : 2218944
+        }
+      },
+      "storeyID" : "00000000-0000-4000-8000-000000002002",
+      "thickness" : {
+        "ticks" : 48768
+      }
+    },
+    {
+      "end" : {
+        "x" : {
+          "ticks" : 1389888
+        },
+        "y" : {
+          "ticks" : 2218944
+        }
+      },
+      "height" : {
+        "ticks" : 780288
+      },
+      "id" : "00000000-0000-4000-8000-000000002015",
+      "layers" : [
+
+      ],
+      "phase" : "new",
+      "start" : {
+        "x" : {
+          "ticks" : 1389888
+        },
+        "y" : {
+          "ticks" : -24384
+        }
+      },
+      "storeyID" : "00000000-0000-4000-8000-000000002002",
+      "thickness" : {
+        "ticks" : 48768
+      }
+    },
+    {
+      "end" : {
+        "x" : {
+          "ticks" : 2414016
+        },
+        "y" : {
+          "ticks" : 2218944
+        }
+      },
+      "height" : {
+        "ticks" : 780288
+      },
+      "id" : "00000000-0000-4000-8000-000000002016",
+      "layers" : [
+
+      ],
+      "phase" : "new",
+      "start" : {
+        "x" : {
+          "ticks" : 2414016
+        },
+        "y" : {
+          "ticks" : -24384
+        }
+      },
+      "storeyID" : "00000000-0000-4000-8000-000000002002",
+      "thickness" : {
+        "ticks" : 48768
+      }
+    },
+    {
+      "end" : {
+        "x" : {
+          "ticks" : 3633216
+        },
+        "y" : {
+          "ticks" : 1194816
+        }
+      },
+      "height" : {
+        "ticks" : 780288
+      },
+      "id" : "00000000-0000-4000-8000-000000002017",
+      "layers" : [
+
+      ],
+      "phase" : "new",
+      "start" : {
+        "x" : {
+          "ticks" : -24384
+        },
+        "y" : {
+          "ticks" : 1194816
+        }
+      },
+      "storeyID" : "00000000-0000-4000-8000-000000002002",
+      "thickness" : {
+        "ticks" : 48768
       }
     }
   ]
