@@ -6,13 +6,22 @@ public struct AddRoomCommand: Command {
     public var storeyID: StoreyID
     public var name: String
     public var boundaryWallIDs: [WallID]
+    public var floorFinish: String?
+    public var wallFinish: String?
+    public var ceilingFinish: String?
     public var index: Int?
 
-    public init(roomID: RoomID, storeyID: StoreyID, name: String, boundaryWallIDs: [WallID], index: Int? = nil) {
+    public init(
+        roomID: RoomID, storeyID: StoreyID, name: String, boundaryWallIDs: [WallID],
+        floorFinish: String? = nil, wallFinish: String? = nil, ceilingFinish: String? = nil, index: Int? = nil
+    ) {
         self.roomID = roomID
         self.storeyID = storeyID
         self.name = name
         self.boundaryWallIDs = boundaryWallIDs
+        self.floorFinish = floorFinish
+        self.wallFinish = wallFinish
+        self.ceilingFinish = ceilingFinish
         self.index = index
     }
 
@@ -24,6 +33,9 @@ public struct AddRoomCommand: Command {
         CommandParameter("storeyID", .id, "ID of the storey the room is on."),
         CommandParameter("name", .string, "Room name, such as Kitchen or Bedroom 2."),
         CommandParameter("boundaryWallIDs", .idList, "IDs of the walls around the room, each once, all on the storey."),
+        CommandParameter("floorFinish", .string, required: false, "Floor finish text; omit for none."),
+        CommandParameter("wallFinish", .string, required: false, "Wall finish text; omit for none."),
+        CommandParameter("ceilingFinish", .string, required: false, "Ceiling finish text; omit for none."),
         insertIndexParameter,
     ]
 
@@ -37,7 +49,9 @@ public struct AddRoomCommand: Command {
 
     public func apply(to document: inout ModelDocument) throws -> AnyCommand {
         try validate(against: document)
-        let room = Room(id: roomID, storeyID: storeyID, name: try CommandCheck.name(name), boundaryWallIDs: boundaryWallIDs)
+        let room = Room(id: roomID, storeyID: storeyID, name: try CommandCheck.name(name), boundaryWallIDs: boundaryWallIDs,
+                        floorFinish: RoomFinishCheck.clean(floorFinish), wallFinish: RoomFinishCheck.clean(wallFinish),
+                        ceilingFinish: RoomFinishCheck.clean(ceilingFinish))
         document.rooms.insert(room, atOptional: index)
         return RemoveRoomCommand(roomID: roomID).erased
     }
@@ -128,7 +142,8 @@ public struct RemoveRoomCommand: Command {
         let removed = document.rooms.remove(at: index)
         return AddRoomCommand(
             roomID: removed.id, storeyID: removed.storeyID, name: removed.name,
-            boundaryWallIDs: removed.boundaryWallIDs, index: index
+            boundaryWallIDs: removed.boundaryWallIDs, floorFinish: removed.floorFinish, wallFinish: removed.wallFinish,
+            ceilingFinish: removed.ceilingFinish, index: index
         ).erased
     }
 }
@@ -141,5 +156,51 @@ enum RoomCheck {
         for id in wallIDs where document.walls[try document.wallIndex(id)].storeyID != storeyID {
             throw CommandValidationError.wallOnOtherStorey(id)
         }
+    }
+}
+
+/// Sets or clears the finish on one surface of a room.
+public struct SetRoomFinishCommand: Command {
+    public var roomID: RoomID
+    public var surface: RoomSurface
+    public var finish: String
+
+    public init(roomID: RoomID, surface: RoomSurface, finish: String) {
+        self.roomID = roomID
+        self.surface = surface
+        self.finish = finish
+    }
+
+    public static let commandName = "set_room_finish"
+    public static let toolDescription =
+        "Set the floor, wall, or ceiling finish text of a room, such as \"Oak strip flooring\"; an empty string clears it."
+    public static let parameters = [
+        CommandParameter("roomID", .id, "ID of the room."),
+        CommandParameter("surface", .choice, "Which surface.", allowedValues: RoomSurface.allCases.map(\.rawValue)),
+        CommandParameter("finish", .string, "Finish description; an empty string clears the surface's finish."),
+    ]
+
+    public func validate(against document: ModelDocument) throws {
+        _ = try document.roomIndex(roomID)
+    }
+
+    public func apply(to document: inout ModelDocument) throws -> AnyCommand {
+        let index = try document.roomIndex(roomID)
+        let previous = document.rooms[index].finish(surface) ?? ""
+        let value = RoomFinishCheck.clean(finish)
+        switch surface {
+        case .floor: document.rooms[index].floorFinish = value
+        case .wall: document.rooms[index].wallFinish = value
+        case .ceiling: document.rooms[index].ceilingFinish = value
+        }
+        return SetRoomFinishCommand(roomID: roomID, surface: surface, finish: previous).erased
+    }
+}
+
+enum RoomFinishCheck {
+    /// Trimmed text, or nil when blank.
+    static func clean(_ text: String?) -> String? {
+        guard let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
+        return trimmed
     }
 }

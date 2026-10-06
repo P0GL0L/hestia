@@ -78,7 +78,8 @@ enum Sample {
                         width: .millimeters(900), height: .millimeters(2100), sillHeight: .millimeters(0)),
             ],
             rooms: [
-                Room(id: room, storeyID: storey, name: "Living", boundaryWallIDs: [wallSouth, wallEast]),
+                Room(id: room, storeyID: storey, name: "Living", boundaryWallIDs: [wallSouth, wallEast],
+                     wallFinish: "Paint"),
             ],
             stairs: [
                 Stair(id: stair, storeyID: storey, runStart: point(1000, 2000), runEnd: point(1000, 4500),
@@ -126,7 +127,7 @@ enum Sample {
     }
 
     /// One valid instance of every v1 command against `document()`.
-    static let commands: [AnyCommand] = core + buildingsAndStoreys + wallsAndOpenings + rooms + alphaElements + siteAndFurnishing + overrides
+    static let commands: [AnyCommand] = core + buildingsAndStoreys + wallsAndOpenings + rooms + alphaElements + siteAndFurnishing + overrides + finishes
 
     static let core: [AnyCommand] = [
         RenameProjectCommand(projectID: project, newName: "Renamed").erased,
