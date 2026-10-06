@@ -146,6 +146,13 @@ public struct AnyCommand: Codable, Hashable, Sendable {
 public enum CommandCatalog {
     public static let v1: [any Command.Type] = [
         RenameProjectCommand.self,
+        AddBuildingCommand.self,
+        RenameBuildingCommand.self,
+        RemoveBuildingCommand.self,
+        AddStoreyCommand.self,
+        RenameStoreyCommand.self,
+        SetStoreyElevationCommand.self,
+        RemoveStoreyCommand.self,
     ]
 
     public static var descriptors: [CommandDescriptor] {
