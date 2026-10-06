@@ -115,7 +115,21 @@ public struct SchematicDrawingSet: DrawingGenerator {
             let placed = ViewTransform.centering(modelMin: extent.min, modelMax: extent.max, in: slot, scale: scale)
             return SitePlanView.items(document, view: placed.transform, area: slot)
                 + SheetFrame.viewTitle("Site Plan", scale: scale, at: titleAt)
-        case .section, .electricalPlan:
+        case let .section(line):
+            let engineCut = try geometry.section(of: document, along: line)
+            let outlines = engineCut.isEmpty ? SectionView.modelOutlines(document, along: line) : engineCut
+            guard let extent = SectionView.extent(outlines) else {
+                return SheetFrame.notGenerated("Section line crosses nothing", in: slot)
+            }
+            let scale = sheet.scale ?? Self.fittingScale(extent: extent, in: slot)
+            let placed = ViewTransform.centering(modelMin: extent.min, modelMax: extent.max, in: slot, scale: scale)
+            let under = paperPoint(placed.transform.paperOrigin.x.ticks,
+                                   placed.transform.paperOrigin.y.ticks - mmTicks(10))
+            return SectionView.items(outlines, view: placed.transform)
+                + SectionView.annotations(document, extent: extent, view: placed.transform,
+                                          imperial: units == .feetInchesFractions)
+                + SheetFrame.viewTitle("Building Section", scale: scale, at: placed.fits ? under : titleAt)
+        case .electricalPlan:
             return SheetFrame.notGenerated(Self.name(of: view), in: slot)
         }
     }
