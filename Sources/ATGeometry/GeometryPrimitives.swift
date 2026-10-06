@@ -33,6 +33,34 @@ public struct ClosedPolygon2: Hashable, Sendable {
     }
 }
 
+/// Closed 3D polygon. First vertex is not repeated at the end.
+public struct ClosedPolygon3: Hashable, Sendable {
+    public var vertices: [Point3]
+
+    public init(vertices: [Point3]) {
+        self.vertices = vertices
+    }
+
+    public var isClosed: Bool {
+        vertices.count >= 3
+    }
+}
+
+/// Axis-aligned rectangle in the XY plane.
+public struct AxisAlignedRectangle2: Hashable, Sendable {
+    public var minX: Length
+    public var minY: Length
+    public var maxX: Length
+    public var maxY: Length
+
+    public init(minX: Length, minY: Length, maxX: Length, maxY: Length) {
+        self.minX = minX
+        self.minY = minY
+        self.maxX = maxX
+        self.maxY = maxY
+    }
+}
+
 public enum GeometryError: Error, Sendable, Equatable {
     case zeroLengthWall(WallID)
     case wallNotAxisAligned(WallID)
