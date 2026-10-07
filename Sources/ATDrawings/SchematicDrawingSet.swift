@@ -116,7 +116,11 @@ public struct SchematicDrawingSet: DrawingGenerator {
             let placed = ViewTransform.centering(modelMin: extent.min, modelMax: extent.max, in: slot, scale: scale)
             let under = paperPoint(placed.transform.paperOrigin.x.ticks,
                                    placed.transform.paperOrigin.y.ticks - mmTicks(12))
-            return RoofPlanView.items(document, view: placed.transform)
+            let roofIDs = Set(document.roofs.map(\.id.rawValue))
+            let roofMeshes = try geometry.meshes(of: document).filter { mesh in
+                mesh.elementID.map { roofIDs.contains($0) } ?? false
+            }
+            return RoofPlanView.items(document, view: placed.transform, roofMeshes: roofMeshes)
                 + SheetFrame.viewTitle("Roof Plan", scale: scale, at: placed.fits ? under : titleAt)
         case .sitePlan:
             guard let extent = SitePlanView.extent(document) else {

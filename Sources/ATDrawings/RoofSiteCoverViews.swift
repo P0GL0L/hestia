@@ -2,6 +2,10 @@ import ATContracts
 import Foundation
 
 /// Roof plan: walls below dashed, the eave line, ridge and hip lines, and the pitch of each sloped plane.
+///
+/// A box footprint is drawn from its own rule. Any other roof is drawn from the engine's roof mesh: the outer
+/// eave as the mesh seen from above, every hip, ridge, and valley where the roof's top folds, and each plane's
+/// pitch. Without a mesh it draws the footprint and says the planes are not resolved.
 enum RoofPlanView {
     static let roofStyle = DisplayStyle(layer: "A-ROOF", pen: .medium)
     static let lineStyle = DisplayStyle(layer: "A-ROOF", pen: .thin)
@@ -31,7 +35,7 @@ enum RoofPlanView {
         return (paperPoint(x0, y0), paperPoint(x1, y1))
     }
 
-    static func items(_ document: ModelDocument, view: ViewTransform) -> [DisplayItem] {
+    static func items(_ document: ModelDocument, view: ViewTransform, roofMeshes: [Mesh] = []) -> [DisplayItem] {
         func at(_ x: Int64, _ y: Int64) -> Point2 { view.paper(paperPoint(x, y)) }
         var items: [DisplayItem] = []
         let roofStoreys = Set(document.roofs.map(\.storeyID))
@@ -42,9 +46,25 @@ enum RoofPlanView {
         for roof in document.roofs {
             let id = roof.id.rawValue
             guard let (inner, outer) = boxes(roof) else {
-                // Not a box: draw the footprint and say the planes are not resolved here.
+                let meshes = roofMeshes.filter { $0.elementID == id }
+                if let plan = meshPlan(meshes) {
+                    items += plan.eaves.map { outline in
+                        DisplayItem(.polyline(points: outline.map { view.paper($0) }, closed: true), style: roofStyle,
+                                    elementID: id)
+                    }
+                    items += plan.folds.map { fold in
+                        DisplayItem(.line(start: view.paper(fold.0), end: view.paper(fold.1)), style: lineStyle,
+                                    elementID: id)
+                    }
+                    items += plan.pitches.map { label($0.1, at: view.paper($0.0)) }
+                    continue
+                }
+                // No mesh: draw the footprint and say the planes are not resolved here.
                 items.append(DisplayItem(.polyline(points: roof.footprint.map { view.paper($0) }, closed: true),
                                          style: roofStyle, elementID: id))
+                let xs = roof.footprint.map(\.x.ticks), ys = roof.footprint.map(\.y.ticks)
+                let middle = at((xs.min()! + xs.max()!) / 2, (ys.min()! + ys.max()!) / 2)
+                items.append(label(unresolved, at: middle))
                 continue
             }
             let (x0, x1, y0, y1) = outer
@@ -80,6 +100,48 @@ enum RoofPlanView {
             items += slopes.map { label(ratio, at: $0) }
         }
         return items
+    }
+
+    static let unresolved = "ROOF PLANES NOT RESOLVED"
+
+    /// A roof drawn from its mesh, in model plan coordinates: the outer eave outlines, the folds (hips, ridges,
+    /// and valleys), and a pitch label inside each sloped plane. Nil when there is no upward-facing roof.
+    static func meshPlan(_ meshes: [Mesh]) -> (eaves: [[Point2]], folds: [(Point2, Point2)], pitches: [(Point2, String)])? {
+        let planes = RoofFolds.planes(of: meshes)
+        guard !planes.isEmpty else { return nil }
+        // Seen from above, with y standing in for height: the union of the roof's triangles in plan.
+        let eaves = MeshSilhouette.outlines(of: meshes) { point in (Double(point.x.ticks), Double(point.y.ticks)) }
+        let folds = RoofFolds.folds(planes).map { fold in
+            (paperPoint(Int64(fold.x0.rounded()), Int64(fold.y0.rounded())),
+             paperPoint(Int64(fold.x1.rounded()), Int64(fold.y1.rounded())))
+        }
+        var pitches: [(Point2, String)] = []
+        for plane in planes {
+            let slope: Double = (plane.a * plane.a + plane.b * plane.b).squareRoot()
+            guard slope > 1e-6, let spot = labelSpot(plane, planes) else { continue }
+            let rise = Length(ticks: Int64((slope * Double(Length.inches(12).ticks)).rounded()))
+            pitches.append((spot, ratio(rise)))
+        }
+        return (eaves, folds, pitches)
+    }
+
+    /// Where a plane's pitch goes: the middle of its largest triangle that is on top of the roof.
+    static func labelSpot(_ plane: RoofFolds.Plane, _ planes: [RoofFolds.Plane]) -> Point2? {
+        var best: (area: Double, x: Double, y: Double)?
+        for t in plane.triangles {
+            let x: Double = (t[0].x + t[1].x + t[2].x) / 3, y: Double = (t[0].y + t[1].y + t[2].y) / 3
+            guard RoofFolds.active(plane, planes, x, y) else { continue }
+            let area: Double = abs((t[1].x - t[0].x) * (t[2].y - t[0].y) - (t[2].x - t[0].x) * (t[1].y - t[0].y)) / 2
+            if area > (best?.area ?? 0) { best = (area, x, y) }
+        }
+        return best.map { paperPoint(Int64($0.x.rounded()), Int64($0.y.rounded())) }
+    }
+
+    /// A pitch as rise over 12, such as 6:12.
+    static func ratio(_ rise: Length) -> String {
+        let text = LengthFormatting.format(rise, style: .feetInchesFractions)
+            .replacingOccurrences(of: "0'-", with: "").replacingOccurrences(of: "\"", with: "")
+        return text + ":12"
     }
 
     static func label(_ text: String, at point: Point2) -> DisplayItem {
