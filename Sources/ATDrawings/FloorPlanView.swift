@@ -43,7 +43,7 @@ enum FloorPlanView {
             items += symbol(for: opening, in: wall, view: view)
             if let mark = marks[opening.id] { items.append(tag(mark, for: opening, in: wall, view: view)) }
         }
-        let imperial = view.scale.label.contains("\"")
+        let imperial = DrawingUnits.style(document, scale: view.scale) == .feetInchesFractions
         for room in document.rooms where room.storeyID == storey {
             guard let polygon = roomPolygon(room.boundaryWallIDs.compactMap { walls[$0] }) else { continue }
             let center = view.paper(centroid(polygon))

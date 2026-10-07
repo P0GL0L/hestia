@@ -26,11 +26,11 @@ enum DimensionChains {
         let westLabels = wallLabels(document: document, walls: walls, alongX: false, face: .west)
         for (tier, chain) in [south.openings, south.walls, south.overall].enumerated() where chain.count > 2 || tier == 2 {
             items += chainItems(chain, alongX: true, face: extent.min.y.ticks, offset: tierOffsets[tier], view: view,
-                                labels: southLabels)
+                                labels: southLabels, document: document)
         }
         for (tier, chain) in [west.openings, west.walls, west.overall].enumerated() where chain.count > 2 || tier == 2 {
             items += chainItems(chain, alongX: false, face: extent.min.x.ticks, offset: tierOffsets[tier], view: view,
-                                labels: westLabels)
+                                labels: westLabels, document: document)
         }
         return items
     }
@@ -92,15 +92,17 @@ enum DimensionChains {
     }
 
     private static func chainItems(
-        _ stops: [Int64], alongX: Bool, face: Int64, offset: Int64, view: ViewTransform, labels: [Span: String]
+        _ stops: [Int64], alongX: Bool, face: Int64, offset: Int64, view: ViewTransform, labels: [Span: String],
+        document: ModelDocument
     ) -> [DisplayItem] {
         zip(stops, stops.dropFirst()).map { a, b in
             let from = view.paper(alongX ? paperPoint(a, face) : paperPoint(face, a))
             let to = view.paper(alongX ? paperPoint(b, face) : paperPoint(face, b))
             // Left of a rightward chain is inside the building, so the south chain uses a negative offset;
             // left of an upward chain is outside, so the west chain uses a positive one.
+            let text = DrawingUnits.dimensionText(document, length: Length(ticks: b - a), override: labels[Span(a, b)])
             return DisplayItem(.dimension(from: from, to: to, offset: Length(ticks: alongX ? -offset : offset),
-                                          override: labels[Span(a, b)]), style: style)
+                                          override: text), style: style)
         }
     }
 
@@ -117,11 +119,15 @@ enum DimensionChains {
             let id = room.id.rawValue
             items.append(DisplayItem(.dimension(from: view.paper(paperPoint(x0, y)), to: view.paper(paperPoint(x1, y)),
                                                 offset: Length(ticks: 0),
-                                                override: document.dimensionOverride(for: id, face: .width)),
+                                                override: DrawingUnits.dimensionText(
+                                                    document, length: Length(ticks: x1 - x0),
+                                                    override: document.dimensionOverride(for: id, face: .width))),
                                      style: style, elementID: room.id.rawValue))
             items.append(DisplayItem(.dimension(from: view.paper(paperPoint(x, y0)), to: view.paper(paperPoint(x, y1)),
                                                 offset: Length(ticks: 0),
-                                                override: document.dimensionOverride(for: id, face: .depth)),
+                                                override: DrawingUnits.dimensionText(
+                                                    document, length: Length(ticks: y1 - y0),
+                                                    override: document.dimensionOverride(for: id, face: .depth))),
                                      style: style, elementID: room.id.rawValue))
         }
         return items

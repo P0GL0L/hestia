@@ -35,7 +35,7 @@ enum SectionView {
 
     /// Ground line and level marks under and beside a section.
     static func annotations(_ document: ModelDocument, extent: (min: Point2, max: Point2), view: ViewTransform,
-                            imperial: Bool) -> [DisplayItem] {
+                            units: LengthFormatStyle) -> [DisplayItem] {
         let reach = Length.millimeters(1500).ticks
         let grade = document.storeys.map(\.elevation.ticks).min() ?? 0
         func at(_ x: Int64, _ z: Int64) -> Point2 { view.paper(paperPoint(x, z)) }
@@ -49,7 +49,7 @@ enum SectionView {
             items.append(DisplayItem(
                 .text(position: Point2(x: mark.x, y: Length(ticks: mark.y.ticks + mmTicks(1))),
                       string: "\(storey.name.uppercased()) "
-                        + LengthFormatting.format(storey.elevation, style: imperial ? .feetInchesFractions : .metric),
+                        + LengthFormatting.format(storey.elevation, style: units),
                       height: .millimeters(2), rotation: .degrees(0), alignment: .left),
                 style: ElevationView.levelStyle))
         }

@@ -127,7 +127,7 @@ public struct SchematicDrawingSet: DrawingGenerator {
                                    placed.transform.paperOrigin.y.ticks - mmTicks(10))
             return SectionView.items(outlines, view: placed.transform)
                 + SectionView.annotations(document, extent: extent, view: placed.transform,
-                                          imperial: units == .feetInchesFractions)
+                                          units: units)
                 + SheetFrame.viewTitle("Building Section", scale: scale, at: placed.fits ? under : titleAt)
         case let .electricalPlan(storeyID):
             let storeyName = document.storeys.first { $0.id == storeyID }?.name ?? "Floor"
@@ -151,9 +151,9 @@ public struct SchematicDrawingSet: DrawingGenerator {
         }
     }
 
-    /// Imperial when any sheet uses an inch scale, metric otherwise.
+    /// The project's display units, else imperial when any sheet uses an inch scale, metric otherwise.
     static func units(_ document: ModelDocument) -> LengthFormatStyle {
-        document.sheets.contains { $0.scale?.label.contains("\"") == true } ? .feetInchesFractions : .metric
+        DrawingUnits.style(document)
     }
 
     static func name(of view: SheetView) -> String {

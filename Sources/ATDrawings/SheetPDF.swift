@@ -168,11 +168,8 @@ public enum SheetPDF {
 
     /// Model length for a paper length, rounded to 1/16" or 1 mm, in the scale's unit system.
     static func measuredLabel(paperTicks: Int64, scale: DrawingScale?) -> String {
-        let model = paperTicks * (scale?.modelUnitsPerPaperUnit ?? 1)
-        let imperial = scale?.label.contains("\"") ?? false
-        let unit = imperial ? Length.ticksPerSixtyFourthInch * 4 : Length.ticksPerMillimeter
-        let rounded = Length(ticks: ((model + unit / 2) / unit) * unit)
-        return LengthFormatting.format(rounded, style: imperial ? .feetInchesFractions : .metric)
+        let model = Length(ticks: paperTicks * (scale?.modelUnitsPerPaperUnit ?? 1))
+        return DrawingUnits.label(model, style: DrawingUnits.isImperial(scale) ? .feetInchesFractions : .metric)
     }
 
     /// Simple outline symbols; unknown names draw a labeled circle so nothing silently disappears.

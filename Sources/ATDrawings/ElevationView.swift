@@ -119,12 +119,12 @@ enum ElevationView {
         let grade = faces.map(\.base).min()!
         let reach = Length.millimeters(1500).ticks
         items.append(DisplayItem(.line(start: at(minH - reach, grade), end: at(maxH + reach, grade)), style: groundStyle))
-        let imperial = view.scale.label.contains("\"")
+        let units = DrawingUnits.style(document, scale: view.scale)
         for storey in document.storeys {
             let z = storey.elevation.ticks
             items.append(DisplayItem(.line(start: at(maxH + reach / 3, z), end: at(maxH + reach, z)), style: levelStyle))
             let label = "\(storey.name.uppercased()) "
-                + LengthFormatting.format(storey.elevation, style: imperial ? .feetInchesFractions : .metric)
+                + LengthFormatting.format(storey.elevation, style: units)
             let mark = at(maxH + reach / 3, z)
             items.append(DisplayItem(.text(position: Point2(x: mark.x, y: Length(ticks: mark.y.ticks + mmTicks(1))),
                                            string: label, height: .millimeters(2), rotation: .degrees(0),
