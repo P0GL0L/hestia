@@ -4,54 +4,104 @@ import SceneKit
 import SwiftUI
 
 /// The geometry engine's meshes in an orbit view: walls, glass, doors, slabs, structure, stairs, and roofs.
+///
+/// An edit changes the meshes but not the session, so only the model's node is refilled and the camera stays
+/// where the person left it. New and Open start another session, and the view starts over with the default
+/// camera.
 struct OrbitScene: NSViewRepresentable {
     var meshes: [Mesh]
+    /// The edit session the meshes come from.
+    var sessionID: UUID
 
-    /// The meshes the view's scene was built from, so it is rebuilt only when the model changes.
+    /// What the view's scene was built from, and the node that holds the model's meshes.
     final class Coordinator {
         var meshes: [Mesh]
+        var sessionID: UUID
+        var content = SCNNode()
+        /// Whether the scene has the default camera yet. A scene built empty gets it with its first meshes.
+        var hasCamera = false
 
-        init(meshes: [Mesh]) {
+        init(meshes: [Mesh], sessionID: UUID) {
             self.meshes = meshes
+            self.sessionID = sessionID
         }
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(meshes: meshes)
+        Coordinator(meshes: meshes, sessionID: sessionID)
     }
 
     func makeNSView(context: Context) -> SCNView {
         let view = SCNView()
-        view.scene = makeScene()
         view.allowsCameraControl = true
         view.autoenablesDefaultLighting = true
         view.backgroundColor = NSColor(calibratedWhite: 0.14, alpha: 1)
+        start(view, context.coordinator)
         return view
     }
 
     func updateNSView(_ view: SCNView, context: Context) {
-        guard context.coordinator.meshes != meshes else { return }
-        context.coordinator.meshes = meshes
-        view.scene = makeScene()
+        let coordinator = context.coordinator
+        if coordinator.sessionID != sessionID {
+            // Another model: start over, default camera included.
+            coordinator.sessionID = sessionID
+            coordinator.meshes = meshes
+            start(view, coordinator)
+            return
+        }
+        guard coordinator.meshes != meshes else { return }
+        // The same model, edited: refill the model node and leave the camera alone.
+        coordinator.meshes = meshes
+        fill(coordinator.content)
+        if !coordinator.hasCamera, let camera = defaultCamera() {
+            view.scene?.rootNode.addChildNode(camera)
+            view.pointOfView = camera
+            coordinator.hasCamera = true
+        }
     }
 
-    private func makeScene() -> SCNScene {
+    /// A new scene holding the meshes, with the default camera when there is anything to look at.
+    private func start(_ view: SCNView, _ coordinator: Coordinator) {
         let scene = SCNScene()
-        let root = scene.rootNode
+        let content = SCNNode()
+        scene.rootNode.addChildNode(content)
+        coordinator.content = content
+        fill(content)
+        let camera = defaultCamera()
+        if let camera {
+            scene.rootNode.addChildNode(camera)
+        }
+        coordinator.hasCamera = camera != nil
+        view.scene = scene
+        if let camera {
+            view.pointOfView = camera
+        }
+    }
+
+    /// Replaces the model node's children with a node per mesh.
+    private func fill(_ content: SCNNode) {
+        for child in content.childNodes {
+            child.removeFromParentNode()
+        }
+        for mesh in meshes where !mesh.indices.isEmpty {
+            content.addChildNode(node(for: mesh))
+        }
+    }
+
+    /// Looks at the middle of the model from the south-east, high enough to see the roof. Nil with no meshes.
+    private func defaultCamera() -> SCNNode? {
         var low = (x: CGFloat.greatestFiniteMagnitude, y: CGFloat.greatestFiniteMagnitude,
                    z: CGFloat.greatestFiniteMagnitude)
         var high = (x: -CGFloat.greatestFiniteMagnitude, y: -CGFloat.greatestFiniteMagnitude,
                     z: -CGFloat.greatestFiniteMagnitude)
         for mesh in meshes where !mesh.indices.isEmpty {
-            root.addChildNode(node(for: mesh))
             for p in mesh.positions {
                 let (x, y, z) = (feet(p.x), feet(p.y), feet(p.z))
                 low = (min(low.x, x), min(low.y, y), min(low.z, z))
                 high = (max(high.x, x), max(high.y, y), max(high.z, z))
             }
         }
-        guard low.x <= high.x else { return scene }
-        // Look at the middle of the model from the south-east, high enough to see the roof.
+        guard low.x <= high.x else { return nil }
         let center = SCNVector3((low.x + high.x) / 2, (low.y + high.y) / 2, (low.z + high.z) / 2)
         let span = max(high.x - low.x, high.y - low.y, high.z - low.z, 1)
         let camera = SCNNode()
@@ -59,8 +109,7 @@ struct OrbitScene: NSViewRepresentable {
         camera.camera?.zFar = Double(span * 20)
         camera.position = SCNVector3(center.x + span * 0.9, center.y - span * 1.2, center.z + span * 0.7)
         camera.look(at: center, up: SCNVector3(0, 0, 1), localFront: SCNVector3(0, 0, -1))
-        root.addChildNode(camera)
-        return scene
+        return camera
     }
 
     private func node(for mesh: Mesh) -> SCNNode {

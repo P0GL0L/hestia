@@ -419,6 +419,9 @@ struct HestiaModel {
 struct EditSession {
     private(set) var model: HestiaModel
     private(set) var undoStack: [AnyCommand] = []
+    /// Which session this is. Edits and undo keep it; New and Open start a session with a new one, so a view
+    /// can tell a changed model from an edited one.
+    let id = UUID()
 
     init(model: HestiaModel) {
         self.model = model
