@@ -2,8 +2,8 @@ import ATContracts
 import Foundation
 
 /// Schematic exterior elevation: the visible faces of walls parallel to the picture plane, their doors and
-/// windows, the roof silhouette, a ground line, and level marks. Model space here is (h, z): h runs left to
-/// right as the viewer sees it, z is elevation.
+/// windows, the roof silhouette, a ground line, and level marks for each floor and each roof's eave and ridge.
+/// Model space here is (h, z): h runs left to right as the viewer sees it, z is elevation.
 enum ElevationView {
     static let wallStyle = DisplayStyle(layer: "A-ELEV-OTLN", pen: .medium)
     static let openingStyle = DisplayStyle(layer: "A-ELEV-OPNG", pen: .thin)
@@ -119,18 +119,41 @@ enum ElevationView {
         let grade = faces.map(\.base).min()!
         let reach = Length.millimeters(1500).ticks
         items.append(DisplayItem(.line(start: at(minH - reach, grade), end: at(maxH + reach, grade)), style: groundStyle))
+        // Marks start past the roof's overhang so their lines never cross it.
+        let roofEdge = roofOutlines(document, direction).flatMap { $0.map(\.x.ticks) }.max() ?? maxH
+        let markH = max(maxH, roofEdge)
         let units = DrawingUnits.style(document, scale: view.scale)
-        for storey in document.storeys {
-            let z = storey.elevation.ticks
-            items.append(DisplayItem(.line(start: at(maxH + reach / 3, z), end: at(maxH + reach, z)), style: levelStyle))
-            let label = "\(storey.name.uppercased()) "
-                + LengthFormatting.format(storey.elevation, style: units)
-            let mark = at(maxH + reach / 3, z)
+        for level in levels(document, direction) {
+            items.append(DisplayItem(.line(start: at(markH + reach / 3, level.z), end: at(markH + reach, level.z)),
+                                     style: levelStyle))
+            let label = level.name + " " + LengthFormatting.format(Length(ticks: level.z), style: units)
+            let mark = at(markH + reach / 3, level.z)
             items.append(DisplayItem(.text(position: Point2(x: mark.x, y: Length(ticks: mark.y.ticks + mmTicks(1))),
                                            string: label, height: .millimeters(2), rotation: .degrees(0),
                                            alignment: .left), style: levelStyle))
         }
         return items
+    }
+
+    /// The heights an elevation marks: every floor, then each roof's eave and, when it is pitched, its ridge,
+    /// both read from the silhouette drawn. A height already marked is not marked again, so an eave at the top
+    /// of the wall, or two roofs at one height, print one mark.
+    static func levels(_ document: ModelDocument, _ direction: ElevationDirection) -> [(name: String, z: Int64)] {
+        var levels = document.storeys.map { (name: $0.name.uppercased(), z: $0.elevation.ticks) }
+        func add(_ name: String, _ z: Int64) {
+            let tolerance = Length.ticksPerMillimeter
+            guard !levels.contains(where: { abs($0.z - z) < tolerance }) else { return }
+            levels.append((name, z))
+        }
+        let elevations = Dictionary(uniqueKeysWithValues: document.storeys.map { ($0.id, $0.elevation.ticks) })
+        for roof in document.roofs {
+            guard let outline = roofOutline(roof, base: elevations[roof.storeyID] ?? 0, direction) else { continue }
+            let zs = outline.map(\.y.ticks)
+            add("EAVE", zs.min()!)
+            let pitched = roof.planes.contains { ($0.pitchRisePer12?.ticks ?? 0) > 0 }
+            if pitched { add("RIDGE", zs.max()!) }
+        }
+        return levels
     }
 
     /// Roof silhouettes in (h, z), from each roof's footprint box and edge pitches.
@@ -139,38 +162,41 @@ enum ElevationView {
     /// no pitch reads as flat. Other combinations fall back to the hip outline. Schematic only.
     static func roofOutlines(_ document: ModelDocument, _ direction: ElevationDirection) -> [[Point2]] {
         let elevations = Dictionary(uniqueKeysWithValues: document.storeys.map { ($0.id, $0.elevation.ticks) })
-        return document.roofs.compactMap { roof in
-            guard roof.footprint.count >= 3 else { return nil }
-            let projected = roof.footprint.map { project($0, direction) }
-            let overhang = roof.planes.map(\.overhang.ticks).max() ?? 0
-            let h0 = projected.map(\.h).min()! - overhang, h1 = projected.map(\.h).max()! + overhang
-            let d0 = projected.map(\.depth).min()! - overhang, d1 = projected.map(\.depth).max()! + overhang
-            let eave = (elevations[roof.storeyID] ?? 0) + roof.eaveHeight.ticks
-            let pitches = roof.planes.compactMap(\.pitchRisePer12?.ticks).filter { $0 > 0 }
-            guard let pitch = pitches.max() else {
-                let fascia = Length.millimeters(250).ticks
-                return [paperPoint(h0, eave), paperPoint(h1, eave), paperPoint(h1, eave + fascia),
-                        paperPoint(h0, eave + fascia)]
+        return document.roofs.compactMap { roofOutline($0, base: elevations[$0.storeyID] ?? 0, direction) }
+    }
+
+    /// One roof's silhouette in (h, z); see `roofOutlines`.
+    static func roofOutline(_ roof: Roof, base: Int64, _ direction: ElevationDirection) -> [Point2]? {
+        guard roof.footprint.count >= 3 else { return nil }
+        let projected = roof.footprint.map { project($0, direction) }
+        let overhang = roof.planes.map(\.overhang.ticks).max() ?? 0
+        let h0 = projected.map(\.h).min()! - overhang, h1 = projected.map(\.h).max()! + overhang
+        let d0 = projected.map(\.depth).min()! - overhang, d1 = projected.map(\.depth).max()! + overhang
+        let eave = base + roof.eaveHeight.ticks
+        let pitches = roof.planes.compactMap(\.pitchRisePer12?.ticks).filter { $0 > 0 }
+        guard let pitch = pitches.max() else {
+            let fascia = Length.millimeters(250).ticks
+            return [paperPoint(h0, eave), paperPoint(h1, eave), paperPoint(h1, eave + fascia),
+                    paperPoint(h0, eave + fascia)]
+        }
+        let twelve = Length.inches(12).ticks
+        let width = h1 - h0, depth = d1 - d0
+        let gableEnds = roof.planes.contains { $0.pitchRisePer12 == nil }
+        if gableEnds {
+            // Ridge along the longer plan direction; gable ends face along it.
+            if width >= depth {
+                let ridge = eave + pitch * (depth / 2) / twelve
+                return [paperPoint(h0, eave), paperPoint(h1, eave), paperPoint(h1, ridge), paperPoint(h0, ridge)]
             }
-            let twelve = Length.inches(12).ticks
-            let width = h1 - h0, depth = d1 - d0
-            let gableEnds = roof.planes.contains { $0.pitchRisePer12 == nil }
-            if gableEnds {
-                // Ridge along the longer plan direction; gable ends face along it.
-                if width >= depth {
-                    let ridge = eave + pitch * (depth / 2) / twelve
-                    return [paperPoint(h0, eave), paperPoint(h1, eave), paperPoint(h1, ridge), paperPoint(h0, ridge)]
-                }
-                let ridge = eave + pitch * (width / 2) / twelve
-                return [paperPoint(h0, eave), paperPoint(h1, eave), paperPoint((h0 + h1) / 2, ridge)]
-            }
-            let half = min(width, depth) / 2
-            let ridge = eave + pitch * half / twelve
-            if width > depth {
-                return [paperPoint(h0, eave), paperPoint(h1, eave), paperPoint(h1 - half, ridge),
-                        paperPoint(h0 + half, ridge)]
-            }
+            let ridge = eave + pitch * (width / 2) / twelve
             return [paperPoint(h0, eave), paperPoint(h1, eave), paperPoint((h0 + h1) / 2, ridge)]
         }
+        let half = min(width, depth) / 2
+        let ridge = eave + pitch * half / twelve
+        if width > depth {
+            return [paperPoint(h0, eave), paperPoint(h1, eave), paperPoint(h1 - half, ridge),
+                    paperPoint(h0 + half, ridge)]
+        }
+        return [paperPoint(h0, eave), paperPoint(h1, eave), paperPoint((h0 + h1) / 2, ridge)]
     }
 }
