@@ -36,6 +36,9 @@ enum LHouse {
         ]
         var next = 10
         func newID() -> UUID { next += 1; return id(next) }
+        // The two partitions on each storey, ground floor first, for the interior doors added at the end.
+        var partitions: [WallID] = []
+        var splits: [WallID] = []
 
         for storey in [ground, upper] {
             var exterior: [WallID] = []
@@ -48,10 +51,12 @@ enum LHouse {
             }
             // Partition between the two wings.
             let partition = WallID(newID())
+            partitions.append(partition)
             list.append(AddWallCommand(wallID: partition, storeyID: storey, start: mm(5000, 6000), end: mm(0, 6000),
                                        thickness: .millimeters(100), height: .millimeters(2700)).erased)
             // Partition splitting the south wing.
             let split = WallID(newID())
+            splits.append(split)
             list.append(AddWallCommand(wallID: split, storeyID: storey, start: mm(5000, 0), end: mm(5000, 6000),
                                        thickness: .millimeters(100), height: .millimeters(2700)).erased)
 
@@ -84,6 +89,21 @@ enum LHouse {
             list.append(AddOpeningCommand(openingID: OpeningID(newID()), wallID: exterior[4],
                                           offsetAlongWall: .millimeters(1000), width: .millimeters(1200),
                                           height: .millimeters(1200), sillHeight: .millimeters(900)).erased)
+        }
+
+        // Interior doors, 900 by 2100 mm, so every room is reached. The partition at y = 6000 runs west from
+        // x = 5000, so its door at x = 3500 to 2600 joins the hall and living room (landing and bedroom 1) clear of
+        // the stair at x = 750 to 1650. The split at x = 5000 runs north from y = 0; its door at y = 3500 to 4400
+        // joins the living room and kitchen (bedroom 1 and bedroom 2).
+        for (index, (partition, split)) in zip(partitions, splits).enumerated() {
+            list.append(AddOpeningCommand(openingID: OpeningID(id(904 + 2 * index)), wallID: partition,
+                                          offsetAlongWall: .millimeters(1500), width: .millimeters(900),
+                                          height: .millimeters(2100), sillHeight: .millimeters(0), kind: .singleDoor,
+                                          swing: DoorSwing(hinge: .nearStart, opensToward: .left)).erased)
+            list.append(AddOpeningCommand(openingID: OpeningID(id(905 + 2 * index)), wallID: split,
+                                          offsetAlongWall: .millimeters(3500), width: .millimeters(900),
+                                          height: .millimeters(2100), sillHeight: .millimeters(0), kind: .singleDoor,
+                                          swing: DoorSwing(hinge: .nearStart, opensToward: .left)).erased)
         }
 
         list += [
@@ -133,4 +153,41 @@ enum LHouse {
     #expect(house.rooms.count == 6)
     #expect(house.roofs.first?.planes.allSatisfy { $0.pitchRisePer12 == .inches(6) } == true)
     #expect(house.project.displayUnits == .metric)
+}
+
+@Test func lHouseRoomsConnectThroughInteriorDoors() throws {
+    let house = try ModelDocument.decode(from: Data(contentsOf: LHouse.fixtureURL))
+    let stair = try #require(house.stairs.first)
+    for storey in house.storeys {
+        let rooms = house.rooms.filter { $0.storeyID == storey.id }
+        // Interior walls: not along the footprint outline. A door in one joins the two rooms it bounds.
+        let outline = Set(LHouse.footprint)
+        let interior = house.walls.filter { wall in
+            let onOutline: Bool = outline.contains(wall.start) && outline.contains(wall.end)
+            return wall.storeyID == storey.id && !onOutline
+        }
+        let walls = Set(interior.map(\.id))
+        var links: [Set<RoomID>] = []
+        for opening in house.openings where walls.contains(opening.wallID) && opening.kind.isDoor {
+            let sides = rooms.filter { $0.boundaryWallIDs.contains(opening.wallID) }.map(\.id)
+            if sides.count == 2 { links.append(Set(sides)) }
+        }
+        #expect(links.count == 2, "\(storey.name)")
+        var reached: Set<RoomID> = [rooms[0].id]
+        for _ in rooms {
+            for link in links where !link.isDisjoint(with: reached) { reached.formUnion(link) }
+        }
+        let roomCount: Int = rooms.count
+        let reachedCount: Int = reached.count
+        #expect(reachedCount == roomCount, "\(storey.name)")
+    }
+    // The hall door stays clear of the stair, which runs at x = 750 to 1650 mm north of the partition.
+    let stairEast: Int64 = stair.runStart.x.ticks + stair.width.ticks / 2
+    let partitionDoors = house.openings.filter { $0.offsetAlongWall == .millimeters(1500) }
+    #expect(partitionDoors.count == 2)
+    for door in partitionDoors {
+        // The partition runs west from x = 5000 mm, so the door's west jamb is at 5000 - offset - width.
+        let westJamb: Int64 = Length.millimeters(5000).ticks - door.offsetAlongWall.ticks - door.width.ticks
+        #expect(westJamb > stairEast)
+    }
 }

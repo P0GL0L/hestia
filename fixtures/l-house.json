@@ -127,6 +127,90 @@
       "width" : {
         "ticks" : 384000
       }
+    },
+    {
+      "height" : {
+        "ticks" : 672000
+      },
+      "id" : "00000000-0000-4000-8000-000000001904",
+      "kind" : "singleDoor",
+      "offsetAlongWall" : {
+        "ticks" : 480000
+      },
+      "sillHeight" : {
+        "ticks" : 0
+      },
+      "swing" : {
+        "hinge" : "nearStart",
+        "opensToward" : "left"
+      },
+      "wallID" : "00000000-0000-4000-8000-000000001017",
+      "width" : {
+        "ticks" : 288000
+      }
+    },
+    {
+      "height" : {
+        "ticks" : 672000
+      },
+      "id" : "00000000-0000-4000-8000-000000001905",
+      "kind" : "singleDoor",
+      "offsetAlongWall" : {
+        "ticks" : 1120000
+      },
+      "sillHeight" : {
+        "ticks" : 0
+      },
+      "swing" : {
+        "hinge" : "nearStart",
+        "opensToward" : "left"
+      },
+      "wallID" : "00000000-0000-4000-8000-000000001018",
+      "width" : {
+        "ticks" : 288000
+      }
+    },
+    {
+      "height" : {
+        "ticks" : 672000
+      },
+      "id" : "00000000-0000-4000-8000-000000001906",
+      "kind" : "singleDoor",
+      "offsetAlongWall" : {
+        "ticks" : 480000
+      },
+      "sillHeight" : {
+        "ticks" : 0
+      },
+      "swing" : {
+        "hinge" : "nearStart",
+        "opensToward" : "left"
+      },
+      "wallID" : "00000000-0000-4000-8000-000000001033",
+      "width" : {
+        "ticks" : 288000
+      }
+    },
+    {
+      "height" : {
+        "ticks" : 672000
+      },
+      "id" : "00000000-0000-4000-8000-000000001907",
+      "kind" : "singleDoor",
+      "offsetAlongWall" : {
+        "ticks" : 1120000
+      },
+      "sillHeight" : {
+        "ticks" : 0
+      },
+      "swing" : {
+        "hinge" : "nearStart",
+        "opensToward" : "left"
+      },
+      "wallID" : "00000000-0000-4000-8000-000000001034",
+      "width" : {
+        "ticks" : 288000
+      }
     }
   ],
   "placements" : [
