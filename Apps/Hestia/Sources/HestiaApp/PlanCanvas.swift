@@ -2,18 +2,29 @@ import ATContracts
 import SwiftUI
 
 /// The floor plan as the drawing set draws it: walls with their hatch, door swings, glazing, stairs, floor
-/// openings, and room tags, fitted to the view. Items are in sheet paper space. A click reports the paper point
-/// under it; `pendingStart`, a paper point, is marked while a wall waits for its end.
+/// openings, and room tags, fitted to the view. Items are in sheet paper space, and `bounds` is the paper the
+/// view fits: the plan's extent, or the blank area of a storey with no walls, outlined so there is somewhere
+/// to click. A click reports the paper point under it; `pendingStart`, a paper point, is marked while a wall
+/// waits for its end.
 struct PlanCanvas: View {
     var items: [DisplayItem]
+    var bounds: (min: Point2, max: Point2)?
     var pendingStart: Point2?
     var onClick: (Point2) -> Void
 
     var body: some View {
         GeometryReader { proxy in
-            let fit = DisplayList(items: items).bounds.map { PlanFit(bounds: $0, size: proxy.size) }
+            let fit = bounds.map { PlanFit(bounds: $0, size: proxy.size) }
             Canvas { context, _ in
-                guard let fit else { return }
+                guard let fit, let bounds else { return }
+                if items.isEmpty {
+                    // Paper y runs up and the view's down, so the paper maximum is the view's top.
+                    let low: CGPoint = fit.point(bounds.min)
+                    let high: CGPoint = fit.point(bounds.max)
+                    let area = CGRect(x: low.x, y: high.y, width: high.x - low.x, height: low.y - high.y)
+                    let outline = StrokeStyle(lineWidth: 1, dash: [4, 4])
+                    context.stroke(Path(area), with: .color(Color(white: 0.8)), style: outline)
+                }
                 for item in items {
                     draw(item, in: &context, fit: fit)
                 }
