@@ -38,6 +38,31 @@ public struct SchematicDrawingSet: DrawingGenerator {
                             content: DisplayList(items: items))
     }
 
+    /// The transform a storey's floor plan is drawn with, from model space to its sheet's paper space, so a view
+    /// of that sheet can map points back into the model with `ViewTransform.model`. It is the floor plan's own
+    /// placement, from the first sheet that draws the plan. Nil when no sheet draws it or the storey has no walls.
+    public func planTransform(for document: ModelDocument, storey: StoreyID) -> ViewTransform? {
+        for sheet in sheetsToDraw(document) {
+            let slots = Self.slots(in: SheetFrame.drawingArea(for: sheet.paper), count: sheet.views.count)
+            for (view, slot) in zip(sheet.views, slots) where view == .floorPlan(storeyID: storey) {
+                return Self.floorPlanPlacement(document, storey: storey, in: slot, sheet: sheet)?.transform
+            }
+        }
+        return nil
+    }
+
+    /// A floor plan's placement in its slot, leaving room outside it for the dimension chains on the south and
+    /// west. The one rule both drawing and `planTransform` use.
+    static func floorPlanPlacement(_ document: ModelDocument, storey: StoreyID, in slot: PaperRect, sheet: Sheet)
+        -> (transform: ViewTransform, fits: Bool)? {
+        guard let extent = FloorPlanView.extent(of: document, storey: storey) else { return nil }
+        let reserve = DimensionChains.reserve
+        let inner = PaperRect(minX: slot.minX + reserve, minY: slot.minY + reserve,
+                              width: slot.width - reserve, height: slot.height - reserve)
+        let scale = sheet.scale ?? fittingScale(extent: extent, in: inner)
+        return ViewTransform.centering(modelMin: extent.min, modelMax: extent.max, in: inner, scale: scale)
+    }
+
     /// Stacks views top to bottom in equal bands, leaving room under each for its title.
     static func slots(in area: PaperRect, count: Int) -> [PaperRect] {
         guard count > 0 else { return [] }
@@ -56,15 +81,11 @@ public struct SchematicDrawingSet: DrawingGenerator {
         switch view {
         case let .floorPlan(storeyID):
             let storeyName = document.storeys.first { $0.id == storeyID }?.name ?? "Floor"
-            guard let extent = FloorPlanView.extent(of: document, storey: storeyID) else {
+            guard let placed = Self.floorPlanPlacement(document, storey: storeyID, in: slot, sheet: sheet) else {
                 return SheetFrame.notGenerated("\(storeyName) plan has no walls", in: slot)
             }
-            // Leave room outside the plan for the dimension chains on the south and west.
             let reserve = DimensionChains.reserve
-            let inner = PaperRect(minX: slot.minX + reserve, minY: slot.minY + reserve,
-                                  width: slot.width - reserve, height: slot.height - reserve)
-            let scale = sheet.scale ?? Self.fittingScale(extent: extent, in: inner)
-            let placed = ViewTransform.centering(modelMin: extent.min, modelMax: extent.max, in: inner, scale: scale)
+            let scale = placed.transform.scale
             let outlines = try geometry.planView(of: document, storey: storeyID)
             let areas = try geometry.roomAreas(of: document, storey: storeyID)
             var stairsBelow: [ClassifiedOutline] = []
