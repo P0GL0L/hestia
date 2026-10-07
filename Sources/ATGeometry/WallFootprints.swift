@@ -5,8 +5,10 @@ import Foundation
 ///
 /// Where wall ends share a point, each wall's faces are mitred against its angular neighbours, so L corners
 /// meet cleanly and three or more ends fill the junction between them. Where a wall ends on another wall's
-/// centerline (a T), the ending wall stops at the through wall's face and the through wall stays whole. Very
-/// sharp angles are bevelled at four wall thicknesses so a mitre never shoots off.
+/// centerline (a T), the ending wall stops at the through wall's face and the through wall stays whole. Where
+/// thinner walls end at a junction with thicker ones, the thicker walls join among themselves as if the thinner
+/// ones were not there, and each thinner wall stops flush on their faces (square where the face is square to
+/// it). Very sharp angles are bevelled at four wall thicknesses so a mitre never shoots off.
 public struct WallFootprints: Sendable {
     public init() {}
 
@@ -19,15 +21,21 @@ public struct WallFootprints: Sendable {
             ends[JunctionPoint(wall.end), default: []].append((index, false))
         }
         var result: [WallID: [Point2]] = [:]
-        for (index, wall) in walls.enumerated() {
-            let start = cap(at: wall.start, wall: index, atStart: true, ends: ends, lines: geometry)
-            let end = cap(at: wall.end, wall: index, atStart: false, ends: ends, lines: geometry)
+        // Thickest first, so a thinner wall can stop on the finished outlines of the thicker ones it meets.
+        var finished: [Int: [Vec]] = [:]
+        let order = walls.indices.sorted { geometry[$0].half > geometry[$1].half }
+        for index in order {
+            let wall = walls[index]
+            let start = cap(at: wall.start, wall: index, atStart: true, ends: ends, lines: geometry, finished: finished)
+            let end = cap(at: wall.end, wall: index, atStart: false, ends: ends, lines: geometry, finished: finished)
             // Away from the start is +u, so its left face is +n; away from the end is -u, so its left is -n.
             var polygon = [start.right, end.left]
             if let node = end.node { polygon.append(node) }
             polygon += [end.right, start.left]
             if let node = start.node { polygon.append(node) }
-            result[wall.id] = polygon.map { $0.rounded() }
+            let rounded = polygon.map { $0.rounded() }
+            result[wall.id] = rounded
+            finished[index] = rounded.map(Vec.init)
         }
         return result
     }
@@ -47,7 +55,7 @@ public struct WallFootprints: Sendable {
 
     private func cap(
         at point: Point2, wall: Int, atStart: Bool, ends: [JunctionPoint: [(index: Int, atStart: Bool)]],
-        lines: [WallLine]
+        lines: [WallLine], finished: [Int: [Vec]]
     ) -> Cap {
         let node = Vec(point)
         var arms: [Arm] = []
@@ -62,6 +70,18 @@ public struct WallFootprints: Sendable {
         let me = lines[wall]
         let away = atStart ? me.u : -me.u
         let leftNormal = away.leftNormal
+        // Thicker walls ending here: stop flush on their outlines.
+        let thicker = Set(arms.filter { $0.ending && $0.half > me.half + 1e-9 }.map(\.wall))
+        let shapes = thicker.compactMap { finished[$0] }
+        if !thicker.isEmpty, shapes.count == thicker.count {
+            let limit = 4 * 2 * thicker.map { lines[$0].half }.max()!
+            let leftStart = node + leftNormal * me.half, rightStart = node - leftNormal * me.half
+            let left = leftStart + away * exit(from: leftStart, along: away, shapes: shapes, limit: limit)
+            let right = rightStart + away * exit(from: rightStart, along: away, shapes: shapes, limit: limit)
+            return Cap(left: left, right: right, node: nil)
+        }
+        // Thinner walls here join the thicker ones on their own; they do not shape this end.
+        arms = arms.filter { $0.half >= me.half - 1e-9 }
         guard arms.count > 1 else {
             return Cap(left: node + leftNormal * me.half, right: node - leftNormal * me.half, node: nil)
         }
@@ -82,6 +102,27 @@ public struct WallFootprints: Sendable {
         let endingCount = arms.filter(\.ending).count
         let hasThrough = arms.contains { !$0.ending }
         return Cap(left: left, right: right, node: endingCount >= 3 && !hasThrough ? node : nil)
+    }
+
+    /// How far a ray runs from `start` before it leaves every one of `shapes`; zero when it starts outside.
+    private func exit(from start: Vec, along direction: Vec, shapes: [[Vec]], limit: Double) -> Double {
+        var stations: [Double] = [0, limit]
+        for shape in shapes {
+            for (a, b) in zip(shape, shape.dropFirst() + shape.prefix(1)) {
+                let edge = b - a
+                let denominator = direction.cross(edge)
+                guard abs(denominator) > 1e-12 else { continue }
+                let t: Double = (a - start).cross(edge) / denominator
+                let s: Double = (a - start).cross(direction) / denominator
+                if t > 0, t < limit, s >= -1e-9, s <= 1 + 1e-9 { stations.append(t) }
+            }
+        }
+        stations.sort()
+        for (t0, t1) in zip(stations, stations.dropFirst()) where t1 - t0 > 1e-6 {
+            let middle = start + direction * ((t0 + t1) / 2)
+            if !shapes.contains(where: { PolygonMath.contains($0, middle) }) { return t0 }
+        }
+        return limit
     }
 
     /// Where the face `side` of an arm along `from` meets face `toSide` of an arm along `to`.
@@ -173,6 +214,16 @@ enum PolygonMath {
     /// Twice the signed area; positive for counterclockwise.
     static func twiceSignedArea(_ points: [Vec]) -> Double {
         zip(points, points.dropFirst() + points.prefix(1)).reduce(0) { $0 + $1.0.cross($1.1) }
+    }
+
+    /// Whether a point lies inside a polygon, by ray casting.
+    static func contains(_ polygon: [Vec], _ p: Vec) -> Bool {
+        var inside = false
+        for (a, b) in zip(polygon, polygon.dropFirst() + polygon.prefix(1)) where (a.y > p.y) != (b.y > p.y) {
+            let x: Double = a.x + (p.y - a.y) / (b.y - a.y) * (b.x - a.x)
+            if p.x < x { inside.toggle() }
+        }
+        return inside
     }
 
     /// Keeps the part of a polygon where `value(p) <= limit` (Sutherland–Hodgman against one line).
