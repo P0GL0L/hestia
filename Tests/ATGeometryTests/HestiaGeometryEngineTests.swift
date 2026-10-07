@@ -210,3 +210,34 @@ private func cottageWallAreaError(_ footprints: [[Point2]], crossing: Double) ->
         try HestiaGeometryEngine().planView(of: document, storey: missing)
     }
 }
+
+/// The inside corner of the l-house, where the 300 mm walls turn and the 100 mm partitions run on.
+@Test func partitionsStopSquareOnTheThickWallFaces() throws {
+    let document = try fixture("l-house")
+    for storey in document.storeys {
+        let walls = document.walls.filter { $0.storeyID == storey.id }
+        let footprints = try WallFootprints().footprints(for: walls)
+        let corner = mm(5000, 6000)
+        let partition = try #require(walls.first { $0.start == corner && $0.end == mm(0, 6000) })
+        let split = try #require(walls.first { $0.start == mm(5000, 0) && $0.end == corner })
+        let east = try #require(walls.first { $0.start == mm(10000, 6000) && $0.end == corner })
+        let north = try #require(walls.first { $0.start == corner && $0.end == mm(5000, 10000) })
+        // The partition along y = 6000 ends, at its junction end, in one edge at x = 4850: the north wall's west face.
+        let partitionEnd: [Point2] = try #require(footprints[partition.id]).filter { $0.x.ticks > mmTicksL(2500) }
+        let partitionExpected: Set<Point2> = [mm(4850, 5950), mm(4850, 6050)]
+        #expect(Set(partitionEnd) == partitionExpected)
+        // The split along x = 5000 ends, at its junction end, in one edge at y = 5850: the east wall's south face.
+        let splitEnd: [Point2] = try #require(footprints[split.id]).filter { $0.y.ticks > mmTicksL(3000) }
+        let splitExpected: Set<Point2> = [mm(4950, 5850), mm(5050, 5850)]
+        #expect(Set(splitEnd) == splitExpected)
+        // The two 300 mm walls mitre with each other alone, inner corner to outer corner.
+        let mitre: Set<Point2> = [mm(4850, 5850), mm(5150, 6150)]
+        let eastCorner = Set(try #require(footprints[east.id])).intersection(mitre)
+        let northCorner = Set(try #require(footprints[north.id])).intersection(mitre)
+        #expect(eastCorner == mitre)
+        #expect(northCorner == mitre)
+        #expect(!(try #require(footprints[east.id])).contains(corner))
+    }
+}
+
+private func mmTicksL(_ value: Int64) -> Int64 { Length.millimeters(value).ticks }
