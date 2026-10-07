@@ -7,6 +7,19 @@ import SwiftUI
 struct OrbitScene: NSViewRepresentable {
     var meshes: [Mesh]
 
+    /// The meshes the view's scene was built from, so it is rebuilt only when the model changes.
+    final class Coordinator {
+        var meshes: [Mesh]
+
+        init(meshes: [Mesh]) {
+            self.meshes = meshes
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(meshes: meshes)
+    }
+
     func makeNSView(context: Context) -> SCNView {
         let view = SCNView()
         view.scene = makeScene()
@@ -16,7 +29,11 @@ struct OrbitScene: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ view: SCNView, context: Context) {}
+    func updateNSView(_ view: SCNView, context: Context) {
+        guard context.coordinator.meshes != meshes else { return }
+        context.coordinator.meshes = meshes
+        view.scene = makeScene()
+    }
 
     private func makeScene() -> SCNScene {
         let scene = SCNScene()
