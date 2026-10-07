@@ -263,15 +263,31 @@ private struct SVGBuilder {
             style: style
         )
         let label = override ?? measuredLabel(from: from, to: to)
-        let mid = (
-            (start.0 + end.0) / 2 + nx * (off + gap * sign),
-            (start.1 + end.1) / 2 + ny * (off + gap * sign)
-        )
+        let height: Length = .millimeters(2)
         var angle = atan2(uy, ux)
         if angle > .pi / 2 + 1e-9 || angle <= -.pi / 2 { angle += .pi }
         let rotation = Angle(microDegrees: Int64((angle * 180 / .pi * 1_000_000).rounded()))
-        out += text(label, at: mid, height: .millimeters(2), rotation: rotation, alignment: .center)
+        let mid = Self.labelPosition(
+            start: start, end: end, normal: (nx * sign, ny * sign), reach: abs(off) + gap,
+            textUp: (-sin(angle), cos(angle)), height: paperMM(height)
+        )
+        out += text(label, at: mid, height: height, rotation: rotation, alignment: .center)
         return out
+    }
+
+    /// Where a dimension's text baseline goes, in paper millimetres: centred along the line, `reach` out along
+    /// `normal` (the side the dimension line sits on). The text grows up from its baseline, so when its up points
+    /// back at the line, as on a chain drawn below, the baseline moves out by the text height too; either way
+    /// the dimension line never strikes it.
+    static func labelPosition(
+        start: (Double, Double), end: (Double, Double), normal: (Double, Double), reach: Double,
+        textUp: (Double, Double), height: Double
+    ) -> (Double, Double) {
+        let facesAway: Bool = textUp.0 * normal.0 + textUp.1 * normal.1 >= 0
+        let distance: Double = facesAway ? reach : reach + height
+        let x: Double = (start.0 + end.0) / 2 + normal.0 * distance
+        let y: Double = (start.1 + end.1) / 2 + normal.1 * distance
+        return (x, y)
     }
 
     private func measuredLabel(from: Point2, to: Point2) -> String {
