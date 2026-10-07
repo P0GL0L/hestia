@@ -29,19 +29,18 @@ private func horizontal(_ edges: [((Int64, Int64), (Int64, Int64))], at z: Int64
     let bands = ElevationView.slabBands(document, .south, slabMeshes: slabMeshes, above: 0)
     #expect(bands.count == 1)
     let band = try #require(bands.first)
-    // The model's slab: 250 mm under the 2800 mm floor, over its outline from x = 0 to 10 000 mm.
-    let expected: [Int64] = [0, mm(10_000), mm(2_550), mm(2_800)]
+    // The model's slab: 250 mm under the 2800 mm floor, out to the walls' outer faces at -150 and 10 150 mm.
+    let expected: [Int64] = [-mm(150), mm(10_150), mm(2_550), mm(2_800)]
     #expect([band.h0, band.h1, band.z0, band.z1] == expected)
 
     // The ground wall stops at the band: no 2700 mm top line runs through it.
     let ground = ElevationView.wallEdges(h0: -mm(150), h1: mm(10_150), base: 0, top: mm(2_700), bands: bands)
-    #expect(horizontal(ground, at: mm(2_700), over: 0, mm(10_000)) == 0)
-    #expect(horizontal(ground, at: mm(2_550), over: 0, mm(10_000)) == 0)
+    #expect(horizontal(ground, at: mm(2_700), over: -mm(150), mm(10_150)) == 0)
+    #expect(horizontal(ground, at: mm(2_550), over: -mm(150), mm(10_150)) == 0)
     // The upper wall's foot is the band's top edge, drawn once by the band.
     let upper = ElevationView.wallEdges(h0: -mm(150), h1: mm(10_150), base: mm(2_800), top: mm(5_500), bands: bands)
-    #expect(horizontal(upper, at: mm(2_800), over: 0, mm(10_000)) == 0)
-    // Beyond the slab's outline the walls keep their own edges.
-    #expect(horizontal(ground, at: mm(2_700), over: -mm(150), 0) == 1)
+    #expect(horizontal(upper, at: mm(2_800), over: -mm(150), mm(10_150)) == 0)
+    // The band spans the whole face, so no corner is left blank, and the wall top stays one line.
     #expect(horizontal(upper, at: mm(5_500), over: -mm(150), mm(10_150)) == 1)
 }
 
