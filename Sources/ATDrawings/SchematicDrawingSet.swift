@@ -117,8 +117,7 @@ public struct SchematicDrawingSet: DrawingGenerator {
             return SitePlanView.items(document, view: placed.transform, area: slot)
                 + SheetFrame.viewTitle("Site Plan", scale: scale, at: titleAt)
         case let .section(line):
-            let engineCut = try geometry.section(of: document, along: line)
-            let outlines = engineCut.isEmpty ? SectionView.modelOutlines(document, along: line) : engineCut
+            let outlines = try geometry.section(of: document, along: line)
             guard let extent = SectionView.extent(outlines) else {
                 return SheetFrame.notGenerated("Section line crosses nothing", in: slot)
             }
