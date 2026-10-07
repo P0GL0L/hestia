@@ -8,6 +8,7 @@ enum ElevationView {
     static let wallStyle = DisplayStyle(layer: "A-ELEV-OTLN", pen: .medium)
     static let openingStyle = DisplayStyle(layer: "A-ELEV-OPNG", pen: .thin)
     static let roofStyle = DisplayStyle(layer: "A-ELEV-ROOF", pen: .medium)
+    static let foldStyle = DisplayStyle(layer: "A-ELEV-ROOF", pen: .thin)
     static let groundStyle = DisplayStyle(layer: "A-ELEV-GRND", pen: .extraHeavy)
     static let slabStyle = DisplayStyle(layer: "A-ELEV-SLAB", pen: .medium)
     static let slabPatternStyle = DisplayStyle(layer: "A-ELEV-SLAB", pen: .extraFine)
@@ -128,6 +129,12 @@ enum ElevationView {
         let roofs = roofOutlines(document, direction, roofMeshes: roofMeshes)
         for outline in roofs {
             items.append(DisplayItem(.polyline(points: outline.map { view.paper($0) }, closed: true), style: roofStyle))
+        }
+        for roof in document.roofs {
+            for (a, b) in folds(of: roof, direction, roofMeshes: roofMeshes, outlines: roofs) {
+                items.append(DisplayItem(.line(start: view.paper(a), end: view.paper(b)), style: foldStyle,
+                                         elementID: roof.id.rawValue))
+            }
         }
         let minH = faces.map(\.h0).min()!, maxH = faces.map(\.h1).max()!
         let reach = Length.millimeters(1500).ticks
@@ -261,6 +268,29 @@ enum ElevationView {
         let elevations = Dictionary(uniqueKeysWithValues: document.storeys.map { ($0.id, $0.elevation.ticks) })
         return document.roofs.flatMap {
             silhouettes(of: $0, base: elevations[$0.storeyID] ?? 0, direction, roofMeshes: roofMeshes)
+        }
+    }
+
+    /// A roof's ridges, hips, and valleys that show inside the silhouette, in (h, z), from its mesh; none
+    /// without one. See `RoofFolds`.
+    static func folds(of roof: Roof, _ direction: ElevationDirection, roofMeshes: [Mesh], outlines: [[Point2]])
+        -> [(Point2, Point2)] {
+        let meshes = roofMeshes.filter { $0.elementID == roof.id.rawValue }
+        guard !meshes.isEmpty else { return [] }
+        let toward: RoofFolds.Vec2
+        switch direction {
+        case .south: toward = RoofFolds.Vec2(x: 0, y: -1)
+        case .north: toward = RoofFolds.Vec2(x: 0, y: 1)
+        case .east: toward = RoofFolds.Vec2(x: 1, y: 0)
+        case .west: toward = RoofFolds.Vec2(x: -1, y: 0)
+        }
+        return RoofFolds.lines(meshes: meshes, toward: toward, outlines: outlines) { x, y in
+            switch direction {
+            case .south: return x
+            case .north: return -x
+            case .east: return y
+            case .west: return -y
+            }
         }
     }
 
