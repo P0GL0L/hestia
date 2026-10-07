@@ -3,11 +3,27 @@ import AppKit
 import SwiftUI
 
 struct ContentView: View {
+    /// What a click on the plan does.
+    enum Tool {
+        /// Two clicks: the wall's start, then its end.
+        case wall
+        /// One click on a drawn wall.
+        case door
+
+        var hint: String {
+            switch self {
+            case .wall: return "Click two points on the plan to add a wall."
+            case .door: return "Click a wall to add a door."
+            }
+        }
+    }
+
+    @State private var tool = Tool.wall
     @State private var session: EditSession?
     @State private var loadError: String?
     /// The first click of a wall, on the plan sheet's paper, until the second click places its end.
     @State private var pendingStart: Point2?
-    @State private var status = "Click two points on the plan to add a wall. Option-click a wall to add a door."
+    @State private var status = Tool.wall.hint
     @State private var exportMessage = "Schematic exports land in ~/Hestia-exports"
 
     init() {
@@ -44,6 +60,8 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             HStack {
+                toolButton("Wall", .wall)
+                toolButton("Door", .door)
                 Button("Undo") { undo() }
                     .keyboardShortcut("z", modifiers: .command)
                     .disabled(!(session?.canUndo ?? false))
@@ -62,11 +80,29 @@ struct ContentView: View {
         .frame(minWidth: 1100, minHeight: 720)
     }
 
-    /// An Option-click on a wall adds a door. Otherwise the first click starts a wall; the second ends it and
-    /// adds it to the ground storey.
+    /// A tool button, marked while its tool is the one clicks use.
+    private func toolButton(_ title: String, _ choice: Tool) -> some View {
+        let selected = tool == choice
+        return Button(action: { select(choice) }) {
+            Text(title)
+                .fontWeight(selected ? .bold : .regular)
+                .padding(.horizontal, 6)
+                .background(RoundedRectangle(cornerRadius: 4)
+                    .fill(selected ? Color.accentColor.opacity(0.3) : Color.clear))
+        }
+    }
+
+    private func select(_ choice: Tool) {
+        tool = choice
+        pendingStart = nil
+        status = choice.hint
+    }
+
+    /// With the Door tool, or an Option-click, a click on a wall adds a door. With the Wall tool the first
+    /// click starts a wall; the second ends it and adds it to the ground storey.
     private func click(_ paper: Point2) {
         guard var current = session else { return }
-        if NSEvent.modifierFlags.contains(.option) {
+        if tool == .door || NSEvent.modifierFlags.contains(.option) {
             addDoor(paper)
             return
         }
@@ -93,7 +129,7 @@ struct ContentView: View {
                 session = current
                 status = "Added a door. Undo removes it."
             } else {
-                status = "Option-click on a wall to add a door there."
+                status = "That missed every wall. " + Tool.door.hint
             }
         } catch {
             status = error.localizedDescription
