@@ -190,6 +190,7 @@ public struct AnyCommand: Codable, Hashable, Sendable {
 public enum CommandCatalog {
     public static let v1: [any Command.Type] = [
         RenameProjectCommand.self,
+        SetProjectUnitsCommand.self,
         AddBuildingCommand.self,
         RenameBuildingCommand.self,
         RemoveBuildingCommand.self,

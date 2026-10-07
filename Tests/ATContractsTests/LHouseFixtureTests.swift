@@ -23,6 +23,7 @@ enum LHouse {
 
     static func commands() -> [AnyCommand] {
         var list: [AnyCommand] = [
+            SetProjectUnitsCommand(projectID: project, units: .metric).erased,
             AddBuildingCommand(buildingID: building, name: "L House").erased,
             AddStoreyCommand(storeyID: ground, buildingID: building, name: "Ground Floor",
                              elevation: .millimeters(0)).erased,
@@ -127,4 +128,5 @@ enum LHouse {
     #expect(house.walls.count == 16)
     #expect(house.rooms.count == 6)
     #expect(house.roofs.first?.planes.allSatisfy { $0.pitchRisePer12 == .inches(6) } == true)
+    #expect(house.project.displayUnits == .metric)
 }

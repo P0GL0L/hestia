@@ -133,6 +133,7 @@
 
   ],
   "project" : {
+    "displayUnits" : "metric",
     "id" : "00000000-0000-4000-8000-000000001000",
     "name" : "L House"
   },
