@@ -84,6 +84,10 @@ struct HestiaModel {
     static let defaultWallThickness: Length = .inches(6)
     static let defaultWallHeight: Length = .feet(8)
 
+    /// The cottage roof's pitch and overhang.
+    static let defaultRoofPitch: Length = .inches(6)
+    static let defaultRoofOverhang: Length = .feet(1)
+
     /// A window's size when the storey has none to copy: the cottage's common window.
     static let defaultWindowWidth: Length = .feet(4)
     static let defaultWindowHeight: Length = .feet(4)
@@ -180,6 +184,54 @@ struct HestiaModel {
     static func describe(_ error: Error) -> String {
         if let described = (error as? LocalizedError)?.errorDescription { return described }
         return "Refused: \(error)"
+    }
+
+    /// A hip roof over the ground storey's wall line, as on the cottage: 6" in 12 on every edge, a 1'-0"
+    /// overhang, and its eave at the walls' height. Only when the ground walls close one rectangle, square to
+    /// the axes: the walls lying on the four sides of the box around all the ground walls must cover those sides
+    /// end to end (walls inside it are fine, so an L, whose box has open sides, is refused). The footprint is the
+    /// rectangle's corners at the wall centerlines, counterclockwise. Refused when the storey has a roof already,
+    /// or when the walls on the sides are not all one height.
+    func roofCommand(id: RoofID = RoofID(UUID())) throws -> AddRoofCommand {
+        guard let storey = groundStorey else { throw LoadError(message: "The model has no storey to roof.") }
+        if document.roofs.contains(where: { $0.storeyID == storey }) {
+            throw LoadError(message: "The ground storey already has a roof, so no other is added.")
+        }
+        let walls = document.walls.filter { $0.storeyID == storey }
+        let refusal = LoadError(message: "The ground walls do not close one rectangle, so there is no roof to add.")
+        let xs: [Int64] = walls.flatMap { [$0.start.x.ticks, $0.end.x.ticks] }
+        let ys: [Int64] = walls.flatMap { [$0.start.y.ticks, $0.end.y.ticks] }
+        guard let x0 = xs.min(), let x1 = xs.max(), let y0 = ys.min(), let y1 = ys.max(), x1 > x0, y1 > y0 else {
+            throw refusal
+        }
+        var sides: [Wall] = []
+        // Each side as the walls on its line, their spans along it, and the span it must cover.
+        let lines: [(onLine: (Wall) -> Bool, span: (Wall) -> (Int64, Int64), from: Int64, to: Int64)] = [
+            ({ $0.start.y.ticks == y0 && $0.end.y.ticks == y0 }, { ($0.start.x.ticks, $0.end.x.ticks) }, x0, x1),
+            ({ $0.start.x.ticks == x1 && $0.end.x.ticks == x1 }, { ($0.start.y.ticks, $0.end.y.ticks) }, y0, y1),
+            ({ $0.start.y.ticks == y1 && $0.end.y.ticks == y1 }, { ($0.start.x.ticks, $0.end.x.ticks) }, x0, x1),
+            ({ $0.start.x.ticks == x0 && $0.end.x.ticks == x0 }, { ($0.start.y.ticks, $0.end.y.ticks) }, y0, y1),
+        ]
+        for line in lines {
+            let on = walls.filter(line.onLine)
+            let spans = on.map(line.span).map { (min($0.0, $0.1), max($0.0, $0.1)) }.sorted { $0.0 < $1.0 }
+            var reached: Int64 = line.from
+            for span in spans where span.0 <= reached {
+                reached = max(reached, span.1)
+            }
+            guard reached >= line.to else { throw refusal }
+            sides += on
+        }
+        let heights = Set(sides.map(\.height))
+        guard heights.count == 1, let height = heights.first else {
+            throw LoadError(message: "The walls around the rectangle are not all one height, so the eave is not set.")
+        }
+        let footprint: [Point2] = [
+            Point2(x: Length(ticks: x0), y: Length(ticks: y0)), Point2(x: Length(ticks: x1), y: Length(ticks: y0)),
+            Point2(x: Length(ticks: x1), y: Length(ticks: y1)), Point2(x: Length(ticks: x0), y: Length(ticks: y1)),
+        ]
+        return AddRoofCommand(roofID: id, storeyID: storey, footprint: footprint, eaveHeight: height,
+                              pitchRisePer12: Self.defaultRoofPitch, overhang: Self.defaultRoofOverhang)
     }
 
     /// A window in a wall, centered on a model point projected onto the wall's centerline, with a new ID. Its
@@ -499,6 +551,11 @@ struct EditSession {
             try perform(model.doorCommand(on: id, at: point).erased)
             return true
         }
+    }
+
+    /// Adds a hip roof over the ground walls when they close one rectangle.
+    mutating func addRoof() throws {
+        try perform(model.roofCommand().erased)
     }
 
     /// Adds a single window where a point of the plan sheet's paper falls on a drawn wall. A point off every

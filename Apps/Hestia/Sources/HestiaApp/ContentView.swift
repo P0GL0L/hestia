@@ -81,6 +81,7 @@ struct ContentView: View {
                 toolButton("Window", .window)
                 toolButton("Delete", .delete)
                 toolButton("Room", .room)
+                Button("Roof") { addRoof() }
                 if tool == .room {
                     TextField("Room name", text: $roomName)
                         .frame(width: 140)
@@ -172,6 +173,19 @@ struct ContentView: View {
             }
         } catch {
             status = error.localizedDescription
+        }
+    }
+
+    /// Puts a hip roof over the ground walls, when they close one rectangle.
+    private func addRoof() {
+        guard var current = session else { return }
+        pendingStart = nil
+        do {
+            try current.addRoof()
+            session = current
+            status = "Added a hip roof. Undo removes it."
+        } catch {
+            status = HestiaModel.describe(error)
         }
     }
 
