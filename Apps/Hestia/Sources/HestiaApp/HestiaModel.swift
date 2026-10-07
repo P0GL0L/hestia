@@ -114,6 +114,22 @@ struct HestiaModel {
         planTransform?.model(paper)
     }
 
+    /// The grid a clicked wall end lands on: 10 mm on a metric project, else 1 inch.
+    var snapStep: Length {
+        document.project.displayUnits == .metric ? .millimeters(10) : .inches(1)
+    }
+
+    /// A model point moved to the nearest point of the snap grid, halves rounding away from zero.
+    func snapped(_ point: Point2) -> Point2 {
+        Point2(x: Self.snap(point.x, to: snapStep), y: Self.snap(point.y, to: snapStep))
+    }
+
+    static func snap(_ length: Length, to step: Length) -> Length {
+        let half: Int64 = step.ticks / 2
+        let shifted: Int64 = length.ticks >= 0 ? length.ticks + half : length.ticks - half
+        return Length(ticks: shifted / step.ticks * step.ticks)
+    }
+
     /// A straight wall on the ground storey from one model point to another, with a new ID, as thick and as
     /// tall as an exterior wall on that storey (one with layers, else the thickest). On a storey with no walls
     /// it takes the default exterior size.
@@ -394,11 +410,16 @@ struct EditSession {
     var canUndo: Bool { !undoStack.isEmpty }
 
     /// Adds a wall between two points of the plan sheet's paper, taken back into the model.
+    /// Each end is snapped to the project's grid, so a clicked wall measures in whole inches (or 10 mm).
     mutating func addWall(fromPaper start: Point2, toPaper end: Point2) throws {
         guard let a = model.modelPoint(paper: start), let b = model.modelPoint(paper: end) else {
             throw HestiaModel.LoadError(message: "The plan has no placement to draw on.")
         }
-        try perform(model.wallCommand(from: a, to: b).erased)
+        let from = model.snapped(a), to = model.snapped(b)
+        guard from != to else {
+            throw HestiaModel.LoadError(message: "Both ends snap to the same point. Click farther apart.")
+        }
+        try perform(model.wallCommand(from: from, to: to).erased)
     }
 
     /// Adds a single door where a point of the plan sheet's paper falls on a drawn wall. A point off every wall
