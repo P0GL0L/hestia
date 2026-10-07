@@ -6,8 +6,12 @@ public enum LengthParseError: Error, Sendable, Equatable {
     case overflow
 }
 
-public enum LengthFormatStyle: Sendable {
+/// How lengths are written. The raw values are stored in model JSON (`Project.displayUnits`) and accepted by
+/// `set_project_units`.
+public enum LengthFormatStyle: String, Codable, Hashable, Sendable, CaseIterable {
+    /// Millimeters, such as `2800 mm`.
     case metric
+    /// Feet, inches, and 64ths, such as `9'-2 1/4"`.
     case feetInchesFractions
 }
 

@@ -131,6 +131,7 @@ enum Sample {
 
     static let core: [AnyCommand] = [
         RenameProjectCommand(projectID: project, newName: "Renamed").erased,
+        SetProjectUnitsCommand(projectID: project, units: .metric).erased,
     ]
 
     static func json(_ value: some Encodable) throws -> Data {

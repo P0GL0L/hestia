@@ -3,10 +3,14 @@ import Foundation
 public struct Project: Hashable, Codable, Sendable {
     public var id: ProjectID
     public var name: String
+    /// How drawings and the UI write lengths for this project. Nil leaves it to the reader and is omitted from
+    /// JSON, so models saved before this field existed are unchanged.
+    public var displayUnits: LengthFormatStyle?
 
-    public init(id: ProjectID, name: String) {
+    public init(id: ProjectID, name: String, displayUnits: LengthFormatStyle? = nil) {
         self.id = id
         self.name = name
+        self.displayUnits = displayUnits
     }
 }
 
