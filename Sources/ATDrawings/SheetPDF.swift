@@ -134,7 +134,7 @@ public enum SheetPDF {
         return out
     }
 
-    /// Extension lines, a dimension line with architectural ticks, and the measured value above it.
+    /// Extension lines, a dimension line with architectural ticks, and the measured value beside it.
     private static func dimension(
         from: Point2, to: Point2, offset: Length, override: String?, scale: DrawingScale?
     ) -> String {
@@ -157,13 +157,37 @@ public enum SheetPDF {
         }
         out += "\(p(x0 + nx * off, y0 + ny * off)) m \(p(x1 + nx * off, y1 + ny * off)) l S\n"
         let label = override ?? measuredLabel(paperTicks: Int64(length.rounded()), scale: scale)
-        let mid = Point2(x: Length(ticks: Int64(((x0 + x1) / 2 + nx * (off + gap * sign)).rounded())),
-                         y: Length(ticks: Int64(((y0 + y1) / 2 + ny * (off + gap * sign)).rounded())))
+        let height = Length.millimeters(2)
+        let place = labelPlacement(from: from, to: to, offset: offset, height: height)
+        out += "0 g\n" + text(label, at: place.position, height: height, rotation: place.rotation, alignment: .center)
+        return out
+    }
+
+    /// Where a dimension's text goes: centred along the line, on the line's offset side, reading left to right
+    /// or bottom to top. The text grows up from its baseline, so when its up points back at the line (as on a
+    /// chain drawn below, with a negative offset) the baseline moves out by the text height too; either way the
+    /// line never strikes it.
+    static func labelPlacement(from: Point2, to: Point2, offset: Length, height: Length)
+        -> (position: Point2, rotation: Angle) {
+        let (x0, y0) = (Double(from.x.ticks), Double(from.y.ticks))
+        let (x1, y1) = (Double(to.x.ticks), Double(to.y.ticks))
+        let length = max(hypot(x1 - x0, y1 - y0), 1)
+        let (ux, uy) = ((x1 - x0) / length, (y1 - y0) / length)
+        let off = Double(offset.ticks)
+        let sign: Double = off >= 0 ? 1 : -1
+        // Unit normal pointing away from the measured points, toward the side the text sits on.
+        let (ax, ay) = (-uy * sign, ux * sign)
         var angle = atan2(uy, ux)
         if angle > .pi / 2 + 1e-9 || angle <= -.pi / 2 { angle += .pi }
+        let (upX, upY) = (-sin(angle), cos(angle))
+        let gap = 1.5 * Double(Length.ticksPerMillimeter)
+        let facesAway = upX * ax + upY * ay >= 0
+        let clearance: Double = facesAway ? gap : gap + Double(height.ticks)
+        let reach: Double = abs(off) + clearance
+        let x: Double = (x0 + x1) / 2 + ax * reach
+        let y: Double = (y0 + y1) / 2 + ay * reach
         let rotation = Angle(microDegrees: Int64((angle * 180 / .pi * 1_000_000).rounded()))
-        out += "0 g\n" + text(label, at: mid, height: .millimeters(2), rotation: rotation, alignment: .center)
-        return out
+        return (Point2(x: Length(ticks: Int64(x.rounded())), y: Length(ticks: Int64(y.rounded()))), rotation)
     }
 
     /// Model length for a paper length, rounded to 1/16" or 1 mm, in the scale's unit system.
