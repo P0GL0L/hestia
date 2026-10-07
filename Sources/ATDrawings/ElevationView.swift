@@ -68,12 +68,13 @@ enum ElevationView {
     }
 
     /// Model-space (h, z) extent of the elevation, or nil when no wall faces this way.
-    static func extent(_ document: ModelDocument, _ direction: ElevationDirection) -> (min: Point2, max: Point2)? {
+    static func extent(_ document: ModelDocument, _ direction: ElevationDirection, roofMeshes: [Mesh] = [])
+        -> (min: Point2, max: Point2)? {
         let faces = faces(document, direction)
         guard !faces.isEmpty else { return nil }
         var minH = faces.map(\.h0).min()!, maxH = faces.map(\.h1).max()!
         var maxZ = faces.map { $0.base + $0.wall.height.ticks }.max()!
-        for outline in roofOutlines(document, direction) {
+        for outline in roofOutlines(document, direction, roofMeshes: roofMeshes) {
             minH = min(minH, outline.map(\.x.ticks).min()!)
             maxH = max(maxH, outline.map(\.x.ticks).max()!)
             maxZ = max(maxZ, outline.map(\.y.ticks).max()!)
@@ -82,7 +83,8 @@ enum ElevationView {
         return (paperPoint(minH, minZ), paperPoint(maxH, maxZ))
     }
 
-    static func items(_ document: ModelDocument, _ direction: ElevationDirection, view: ViewTransform) -> [DisplayItem] {
+    static func items(_ document: ModelDocument, _ direction: ElevationDirection, view: ViewTransform,
+                      roofMeshes: [Mesh] = []) -> [DisplayItem] {
         let faces = faces(document, direction)
         guard !faces.isEmpty else { return [] }
         func at(_ h: Int64, _ z: Int64) -> Point2 { view.paper(paperPoint(h, z)) }
@@ -112,7 +114,8 @@ enum ElevationView {
                 }
             }
         }
-        for outline in roofOutlines(document, direction) {
+        let roofs = roofOutlines(document, direction, roofMeshes: roofMeshes)
+        for outline in roofs {
             items.append(DisplayItem(.polyline(points: outline.map { view.paper($0) }, closed: true), style: roofStyle))
         }
         let minH = faces.map(\.h0).min()!, maxH = faces.map(\.h1).max()!
@@ -120,10 +123,10 @@ enum ElevationView {
         let reach = Length.millimeters(1500).ticks
         items.append(DisplayItem(.line(start: at(minH - reach, grade), end: at(maxH + reach, grade)), style: groundStyle))
         // Marks start past the roof's overhang so their lines never cross it.
-        let roofEdge = roofOutlines(document, direction).flatMap { $0.map(\.x.ticks) }.max() ?? maxH
+        let roofEdge = roofs.flatMap { $0.map(\.x.ticks) }.max() ?? maxH
         let markH = max(maxH, roofEdge)
         let units = DrawingUnits.style(document, scale: view.scale)
-        for level in levels(document, direction) {
+        for level in levels(document, direction, roofMeshes: roofMeshes) {
             items.append(DisplayItem(.line(start: at(markH + reach / 3, level.z), end: at(markH + reach, level.z)),
                                      style: levelStyle))
             let label = level.name + " " + LengthFormatting.format(Length(ticks: level.z), style: units)
@@ -138,7 +141,8 @@ enum ElevationView {
     /// The heights an elevation marks: every floor, then each roof's eave and, when it is pitched, its ridge,
     /// both read from the silhouette drawn. A height already marked is not marked again, so an eave at the top
     /// of the wall, or two roofs at one height, print one mark.
-    static func levels(_ document: ModelDocument, _ direction: ElevationDirection) -> [(name: String, z: Int64)] {
+    static func levels(_ document: ModelDocument, _ direction: ElevationDirection, roofMeshes: [Mesh] = [])
+        -> [(name: String, z: Int64)] {
         var levels = document.storeys.map { (name: $0.name.uppercased(), z: $0.elevation.ticks) }
         func add(_ name: String, _ z: Int64) {
             let tolerance = Length.ticksPerMillimeter
@@ -147,8 +151,9 @@ enum ElevationView {
         }
         let elevations = Dictionary(uniqueKeysWithValues: document.storeys.map { ($0.id, $0.elevation.ticks) })
         for roof in document.roofs {
-            guard let outline = roofOutline(roof, base: elevations[roof.storeyID] ?? 0, direction) else { continue }
-            let zs = outline.map(\.y.ticks)
+            let outlines = silhouettes(of: roof, base: elevations[roof.storeyID] ?? 0, direction, roofMeshes: roofMeshes)
+            let zs = outlines.flatMap { $0.map(\.y.ticks) }
+            guard !zs.isEmpty else { continue }
             add("EAVE", zs.min()!)
             let pitched = roof.planes.contains { ($0.pitchRisePer12?.ticks ?? 0) > 0 }
             if pitched { add("RIDGE", zs.max()!) }
@@ -156,16 +161,34 @@ enum ElevationView {
         return levels
     }
 
-    /// Roof silhouettes in (h, z), from each roof's footprint box and edge pitches.
+    /// Roof silhouettes in (h, z). Each roof is drawn from the engine's mesh for it when `roofMeshes` holds one,
+    /// so the elevation shows the same roof as the 3D view and the section; otherwise from its footprint box.
+    static func roofOutlines(_ document: ModelDocument, _ direction: ElevationDirection, roofMeshes: [Mesh] = [])
+        -> [[Point2]] {
+        let elevations = Dictionary(uniqueKeysWithValues: document.storeys.map { ($0.id, $0.elevation.ticks) })
+        return document.roofs.flatMap {
+            silhouettes(of: $0, base: elevations[$0.storeyID] ?? 0, direction, roofMeshes: roofMeshes)
+        }
+    }
+
+    /// One roof's outlines in (h, z): its mesh projected when there is one, else the box outline.
+    static func silhouettes(of roof: Roof, base: Int64, _ direction: ElevationDirection, roofMeshes: [Mesh])
+        -> [[Point2]] {
+        let meshes = roofMeshes.filter { $0.elementID == roof.id.rawValue }
+        if !meshes.isEmpty {
+            let outlines = MeshSilhouette.outlines(of: meshes) { point in
+                let (h, _) = project(Point2(x: point.x, y: point.y), direction)
+                return (Double(h), Double(point.z.ticks))
+            }
+            if !outlines.isEmpty { return outlines }
+        }
+        return [roofOutline(roof, base: base, direction)].compactMap { $0 }
+    }
+
+    /// One roof's outline from its footprint box and edge pitches, for engines that give no roof mesh.
     ///
     /// Equal pitches on every edge read as a hip; pitched long sides with gable short ends read as a gable;
     /// no pitch reads as flat. Other combinations fall back to the hip outline. Schematic only.
-    static func roofOutlines(_ document: ModelDocument, _ direction: ElevationDirection) -> [[Point2]] {
-        let elevations = Dictionary(uniqueKeysWithValues: document.storeys.map { ($0.id, $0.elevation.ticks) })
-        return document.roofs.compactMap { roofOutline($0, base: elevations[$0.storeyID] ?? 0, direction) }
-    }
-
-    /// One roof's silhouette in (h, z); see `roofOutlines`.
     static func roofOutline(_ roof: Roof, base: Int64, _ direction: ElevationDirection) -> [Point2]? {
         guard roof.footprint.count >= 3 else { return nil }
         let projected = roof.footprint.map { project($0, direction) }
