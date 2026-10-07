@@ -1,103 +1,112 @@
 import ATContracts
-import ATGeometry
 import SwiftUI
 
+/// The floor plan as the drawing set draws it: walls with their hatch, door swings, glazing, stairs, floor
+/// openings, and room tags, fitted to the view. Items are in sheet paper space.
 struct PlanCanvas: View {
-    var cottage: SixRoomCottage
+    var items: [DisplayItem]
 
     var body: some View {
         Canvas { context, size in
-            let outlines = (try? StraightWallOutlines().outlines(for: cottage.walls)) ?? [:]
-            let bounds = planBounds(outlines: outlines)
-            let scale = fitScale(bounds: bounds, size: size)
-            var wallPath = Path()
-            for polygon in outlines.values {
-                append(polygon.vertices, to: &wallPath, bounds: bounds, scale: scale, size: size)
-            }
-            context.stroke(wallPath, with: .color(.black), lineWidth: 1.5)
-
-            var stairPath = Path()
-            let cut = cottage.slabCut
-            append(
-                [
-                    Point2(x: cut.minX, y: cut.minY),
-                    Point2(x: cut.maxX, y: cut.minY),
-                    Point2(x: cut.maxX, y: cut.maxY),
-                    Point2(x: cut.minX, y: cut.maxY),
-                ],
-                to: &stairPath,
-                bounds: bounds,
-                scale: scale,
-                size: size
-            )
-            context.stroke(stairPath, with: .color(.orange), lineWidth: 1)
-
-            for room in cottage.rooms {
-                let center = Point2(
-                    x: Length(ticks: room.interiorMin.x.ticks + room.interiorWidth.ticks / 2),
-                    y: Length(ticks: room.interiorMin.y.ticks + room.interiorHeight.ticks / 2)
-                )
-                let point = map(center, bounds: bounds, scale: scale, size: size)
-                context.draw(Text(room.name).font(.caption), at: point)
+            guard let bounds = DisplayList(items: items).bounds else { return }
+            let fit = Fit(bounds: bounds, size: size)
+            for item in items {
+                draw(item, in: &context, fit: fit)
             }
         }
     }
 
-    private func planBounds(outlines: [WallID: ClosedPolygon2]) -> (minX: Int64, minY: Int64, maxX: Int64, maxY: Int64) {
-        var minX = Int64.max
-        var minY = Int64.max
-        var maxX = Int64.min
-        var maxY = Int64.min
-        for polygon in outlines.values {
-            for vertex in polygon.vertices {
-                minX = min(minX, vertex.x.ticks)
-                minY = min(minY, vertex.y.ticks)
-                maxX = max(maxX, vertex.x.ticks)
-                maxY = max(maxY, vertex.y.ticks)
+    /// Paper space to view points: centered, y up, with a margin.
+    struct Fit {
+        var minX: Double
+        var minY: Double
+        var scale: Double
+        var originX: Double
+        var originY: Double
+        var height: Double
+
+        init(bounds: (min: Point2, max: Point2), size: CGSize) {
+            minX = Double(bounds.min.x.ticks)
+            minY = Double(bounds.min.y.ticks)
+            let width = max(Double(bounds.max.x.ticks) - minX, 1)
+            let depth = max(Double(bounds.max.y.ticks) - minY, 1)
+            scale = min(Double(size.width) / width, Double(size.height) / depth) * 0.9
+            originX = (Double(size.width) - width * scale) / 2
+            originY = (Double(size.height) - depth * scale) / 2
+            height = Double(size.height)
+        }
+
+        func point(_ p: Point2) -> CGPoint {
+            point(Double(p.x.ticks), Double(p.y.ticks))
+        }
+
+        func point(_ x: Double, _ y: Double) -> CGPoint {
+            CGPoint(x: originX + (x - minX) * scale, y: height - (originY + (y - minY) * scale))
+        }
+
+        func points(_ length: Length) -> Double { Double(length.ticks) * scale }
+    }
+
+    private func draw(_ item: DisplayItem, in context: inout GraphicsContext, fit: Fit) {
+        let style = stroke(item.style, fit: fit)
+        switch item.primitive {
+        case let .line(start, end):
+            var path = Path()
+            path.move(to: fit.point(start))
+            path.addLine(to: fit.point(end))
+            context.stroke(path, with: .color(.black), style: style)
+        case let .polyline(points, closed):
+            context.stroke(polyline(points, closed: closed, fit: fit), with: .color(.black), style: style)
+        case let .arc(center, radius, start, sweep):
+            var path = Path()
+            let steps = 32
+            for step in 0...steps {
+                let degrees = Double(start.microDegrees + sweep.microDegrees * Int64(step) / Int64(steps)) / 1_000_000
+                let radians = degrees * .pi / 180
+                let x = Double(center.x.ticks) + Double(radius.ticks) * cos(radians)
+                let y = Double(center.y.ticks) + Double(radius.ticks) * sin(radians)
+                if step == 0 { path.move(to: fit.point(x, y)) } else { path.addLine(to: fit.point(x, y)) }
             }
+            context.stroke(path, with: .color(.black), style: style)
+        case let .hatch(boundary, _, _, _):
+            // A light fill reads better on screen than the hatch lines themselves.
+            context.fill(polyline(boundary, closed: true, fit: fit), with: .color(Color(white: 0.82)))
+        case let .text(position, string, height, rotation, alignment):
+            // Height is cap height; Helvetica's cap height is 0.718 of its size.
+            let size = max(fit.points(height) / 0.718, 6)
+            let anchor: UnitPoint
+            switch alignment {
+            case .left: anchor = .bottomLeading
+            case .center: anchor = .bottom
+            case .right: anchor = .bottomTrailing
+            }
+            var copy = context
+            copy.translateBy(x: fit.point(position).x, y: fit.point(position).y)
+            copy.rotate(by: .degrees(-Double(rotation.microDegrees) / 1_000_000))
+            copy.draw(Text(string).font(.system(size: size)), at: .zero, anchor: anchor)
+        case .dimension, .symbol:
+            break
         }
-        if minX == Int64.max {
-            return (0, 0, 1, 1)
-        }
-        return (minX, minY, maxX, maxY)
     }
 
-    private func fitScale(
-        bounds: (minX: Int64, minY: Int64, maxX: Int64, maxY: Int64),
-        size: CGSize
-    ) -> CGFloat {
-        let width = CGFloat(max(bounds.maxX - bounds.minX, 1))
-        let height = CGFloat(max(bounds.maxY - bounds.minY, 1))
-        return min(size.width / width, size.height / height) * 0.86
+    private func polyline(_ points: [Point2], closed: Bool, fit: Fit) -> Path {
+        var path = Path()
+        guard let first = points.first else { return path }
+        path.move(to: fit.point(first))
+        for point in points.dropFirst() { path.addLine(to: fit.point(point)) }
+        if closed { path.closeSubpath() }
+        return path
     }
 
-    private func map(
-        _ point: Point2,
-        bounds: (minX: Int64, minY: Int64, maxX: Int64, maxY: Int64),
-        scale: CGFloat,
-        size: CGSize
-    ) -> CGPoint {
-        let modelWidth = CGFloat(bounds.maxX - bounds.minX) * scale
-        let modelHeight = CGFloat(bounds.maxY - bounds.minY) * scale
-        let originX = (size.width - modelWidth) / 2
-        let originY = (size.height - modelHeight) / 2
-        let x = originX + CGFloat(point.x.ticks - bounds.minX) * scale
-        let y = size.height - (originY + CGFloat(point.y.ticks - bounds.minY) * scale)
-        return CGPoint(x: x, y: y)
-    }
-
-    private func append(
-        _ vertices: [Point2],
-        to path: inout Path,
-        bounds: (minX: Int64, minY: Int64, maxX: Int64, maxY: Int64),
-        scale: CGFloat,
-        size: CGSize
-    ) {
-        guard let first = vertices.first else { return }
-        path.move(to: map(first, bounds: bounds, scale: scale, size: size))
-        for vertex in vertices.dropFirst() {
-            path.addLine(to: map(vertex, bounds: bounds, scale: scale, size: size))
+    /// The pen's printed width, at the view's scale, never thinner than half a point.
+    private func stroke(_ style: DisplayStyle, fit: Fit) -> StrokeStyle {
+        let pen = Length(ticks: Int64(style.pen.rawValue) * Length.ticksPerMillimeter / 100)
+        let width = max(fit.points(pen), 0.5)
+        switch style.pattern {
+        case .solid: return StrokeStyle(lineWidth: width)
+        case .dashed: return StrokeStyle(lineWidth: width, dash: [6, 3])
+        case .hidden: return StrokeStyle(lineWidth: width, dash: [3, 2])
+        case .center: return StrokeStyle(lineWidth: width, dash: [10, 3, 2, 3])
         }
-        path.closeSubpath()
     }
 }

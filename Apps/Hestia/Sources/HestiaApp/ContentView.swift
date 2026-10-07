@@ -1,10 +1,8 @@
-import ATDrawings
-import ATExchange
-import ATGeometry
+import ATContracts
 import SwiftUI
 
 struct ContentView: View {
-    private let loaded = Result { try CottageFixture.sixRoom() }
+    private let loaded = Result { try HestiaModel.cottage() }
     @State private var exportMessage = "Schematic exports land in ~/Hestia-exports"
 
     var body: some View {
@@ -12,25 +10,25 @@ struct ContentView: View {
         case .failure(let error):
             Text(error.localizedDescription)
                 .padding()
-        case .success(let cottage):
+        case .success(let model):
             VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Hestia cottage")
+                    Text(model.document.project.name)
                         .font(.title2.weight(.semibold))
-                    Text(SchematicFloorPlanPDF.schematicStamp)
+                    Text(OutputHonesty.schematicStamp)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 HStack(spacing: 12) {
-                    PlanCanvas(cottage: cottage)
+                    PlanCanvas(items: model.plan)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color(white: 0.96))
-                    OrbitScene(cottage: cottage)
+                        .background(Color.white)
+                    OrbitScene(meshes: model.meshes)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 HStack {
-                    Button("Export PDF") { exportPDF(cottage) }
-                    Button("Export DXF") { exportDXF(cottage) }
+                    Button("Export PDF") { exportPDF(model) }
+                    Button("Export DXF") { exportDXF(model) }
                     Text(exportMessage)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -42,15 +40,22 @@ struct ContentView: View {
         }
     }
 
-    private func exportPDF(_ cottage: SixRoomCottage) {
-        writeExport(name: "cottage-schematic.pdf") {
-            try SchematicFloorPlanPDF.export(walls: cottage.walls)
+    private func fileName(_ model: HestiaModel, _ suffix: String) -> String {
+        let name = model.document.project.name.lowercased()
+            .split { !$0.isLetter && !$0.isNumber }
+            .joined(separator: "-")
+        return (name.isEmpty ? "hestia" : name) + suffix
+    }
+
+    private func exportPDF(_ model: HestiaModel) {
+        writeExport(name: fileName(model, "-schematic-set.pdf")) {
+            try model.pdf()
         }
     }
 
-    private func exportDXF(_ cottage: SixRoomCottage) {
-        writeExport(name: "cottage-schematic.dxf") {
-            Data(try SchematicWallOutlineDXF.export(walls: cottage.walls).utf8)
+    private func exportDXF(_ model: HestiaModel) {
+        writeExport(name: fileName(model, "-ground-plan.dxf")) {
+            try model.dxf()
         }
     }
 
