@@ -81,9 +81,10 @@ public struct SchematicDrawingSet: DrawingGenerator {
         case let .elevation(direction):
             let name = Self.name(of: view)
             let roofIDs = Set(document.roofs.map(\.id.rawValue))
-            let roofMeshes = try geometry.meshes(of: document).filter { mesh in
-                mesh.elementID.map { roofIDs.contains($0) } ?? false
-            }
+            let slabIDs = Set(document.slabs.map(\.id.rawValue))
+            let meshes = try geometry.meshes(of: document)
+            let roofMeshes = meshes.filter { mesh in mesh.elementID.map { roofIDs.contains($0) } ?? false }
+            let slabMeshes = meshes.filter { mesh in mesh.elementID.map { slabIDs.contains($0) } ?? false }
             guard let extent = ElevationView.extent(document, direction, roofMeshes: roofMeshes) else {
                 return SheetFrame.notGenerated(name, in: slot)
             }
@@ -91,7 +92,8 @@ public struct SchematicDrawingSet: DrawingGenerator {
             let placed = ViewTransform.centering(modelMin: extent.min, modelMax: extent.max, in: slot, scale: scale)
             let under = paperPoint(placed.transform.paperOrigin.x.ticks,
                                    placed.transform.paperOrigin.y.ticks - mmTicks(10))
-            return ElevationView.items(document, direction, view: placed.transform, roofMeshes: roofMeshes)
+            return ElevationView.items(document, direction, view: placed.transform, roofMeshes: roofMeshes,
+                                       slabMeshes: slabMeshes)
                 + SheetFrame.viewTitle(name, scale: scale, at: placed.fits ? under : titleAt)
         case let .schedule(kind):
             var areas: [RoomID: Area] = [:]
