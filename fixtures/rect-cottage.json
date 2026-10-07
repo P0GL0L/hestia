@@ -73,7 +73,7 @@
         "ticks" : 0
       },
       "swing" : {
-        "hinge" : "nearStart",
+        "hinge" : "nearEnd",
         "opensToward" : "left"
       },
       "wallID" : "00000000-0000-4000-8000-000000002012",
@@ -163,7 +163,7 @@
       },
       "swing" : {
         "hinge" : "nearStart",
-        "opensToward" : "left"
+        "opensToward" : "right"
       },
       "wallID" : "00000000-0000-4000-8000-000000002015",
       "width" : {

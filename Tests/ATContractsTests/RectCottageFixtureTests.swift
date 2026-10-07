@@ -53,6 +53,10 @@ enum RectCottage {
         }
         let door = ft(6, 8)
         let inward = DoorSwing(hinge: .nearStart, opensToward: .left)
+        // The back door hinges at its north jamb, still opening in; the living room door to the kitchen opens
+        // into the kitchen.
+        let backDoor = DoorSwing(hinge: .nearEnd, opensToward: .left)
+        let intoKitchen = DoorSwing(hinge: .nearStart, opensToward: .right)
         return [
             AddBuildingCommand(buildingID: building, name: "Cottage").erased,
             AddStoreyCommand(storeyID: storey, buildingID: building, name: "Ground Floor", elevation: ft(0)).erased,
@@ -71,12 +75,12 @@ enum RectCottage {
             room(35, "Bedroom 2", [6, 1, 2, 5]),
             opening(40, 0, ft(5), ft(3), door, ft(0), .singleDoor, inward),
             opening(41, 0, ft(18), ft(4), ft(4), ft(3), .window),
-            opening(42, 1, ft(3), ft(3), door, ft(0), .singleDoor, inward),
+            opening(42, 1, ft(3), ft(3), door, ft(0), .singleDoor, backDoor),
             opening(43, 1, ft(16), ft(4), ft(4), ft(3), .window),
             opening(44, 2, ft(28, 3), ft(4), ft(4), ft(3), .window),
             opening(45, 2, ft(18, 3), ft(2), ft(2), ft(4, 6), .window),
             opening(46, 3, ft(15), ft(4), ft(4), ft(3), .window),
-            opening(47, 4, ft(3), ft(2, 8), door, ft(0), .singleDoor, inward),
+            opening(47, 4, ft(3), ft(2, 8), door, ft(0), .singleDoor, intoKitchen),
             opening(48, 6, ft(4), ft(2, 8), door, ft(0), .singleDoor, inward),
             opening(49, 6, ft(18), ft(2, 8), door, ft(0), .pocketDoor),
             opening(50, 6, ft(30), ft(2, 8), door, ft(0), .singleDoor, inward),
@@ -151,6 +155,35 @@ enum RectCottage {
         return false
     }
     #expect(sections.count == 1)
+}
+
+@Test func rectCottageDoorSwingsVaryAndOpenInside() throws {
+    let cottage = try ModelDocument.decode(from: Data(contentsOf: RectCottage.fixtureURL))
+    let walls = Dictionary(uniqueKeysWithValues: cottage.walls.map { ($0.id, $0) })
+    let hinged = cottage.openings.filter { $0.swing != nil }
+    #expect(hinged.count == 5)
+    let swings = Set(hinged.compactMap(\.swing))
+    #expect(swings.count >= 2)
+    // The back door, in the east wall, is not the common swing.
+    let back = try #require(hinged.first { $0.wallID == RectCottage.walls[1] })
+    #expect(back.swing != DoorSwing(hinge: .nearStart, opensToward: .left))
+    // Each leaf, swung open, lies inside the building's outer faces.
+    let (x0, x1) = (Length.inches(-6).ticks, RectCottage.ft(37, 6).ticks)
+    let (y0, y1) = (Length.inches(-6).ticks, RectCottage.ft(23).ticks)
+    for door in hinged {
+        let wall = try #require(walls[door.wallID])
+        let swing = try #require(door.swing)
+        let dx = Double(wall.end.x.ticks - wall.start.x.ticks), dy = Double(wall.end.y.ticks - wall.start.y.ticks)
+        let length: Double = (dx * dx + dy * dy).squareRoot()
+        let side: Double = swing.opensToward == .left ? 1 : -1
+        let nx: Double = -dy / length * side, ny: Double = dx / length * side
+        let along: Double = Double(door.offsetAlongWall.ticks) + Double(door.width.ticks) / 2
+        let reach: Double = Double(wall.thickness.ticks) / 2 + Double(door.width.ticks)
+        let x: Double = Double(wall.start.x.ticks) + dx / length * along + nx * reach
+        let y: Double = Double(wall.start.y.ticks) + dy / length * along + ny * reach
+        let inside: Bool = x > Double(x0) && x < Double(x1) && y > Double(y0) && y < Double(y1)
+        #expect(inside, "door \(door.id)")
+    }
     #expect(cottage.stairs.count == 1)
     #expect(cottage.openings.filter { $0.kind.isDoor }.count == 6)
     let elevations = cottage.sheets.flatMap(\.views).compactMap { view -> ElevationDirection? in
