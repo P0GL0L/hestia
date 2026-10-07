@@ -9,6 +9,8 @@ enum ElevationView {
     static let openingStyle = DisplayStyle(layer: "A-ELEV-OPNG", pen: .thin)
     static let roofStyle = DisplayStyle(layer: "A-ELEV-ROOF", pen: .medium)
     static let groundStyle = DisplayStyle(layer: "A-ELEV-GRND", pen: .extraHeavy)
+    static let slabStyle = DisplayStyle(layer: "A-ELEV-SLAB", pen: .medium)
+    static let slabPatternStyle = DisplayStyle(layer: "A-ELEV-SLAB", pen: .extraFine)
     static let levelStyle = DisplayStyle(layer: "A-ANNO-TEXT", pen: .fine)
 
     /// Plan point → (h, depth), where smaller depth is nearer the viewer.
@@ -84,17 +86,26 @@ enum ElevationView {
     }
 
     static func items(_ document: ModelDocument, _ direction: ElevationDirection, view: ViewTransform,
-                      roofMeshes: [Mesh] = []) -> [DisplayItem] {
+                      roofMeshes: [Mesh] = [], slabMeshes: [Mesh] = []) -> [DisplayItem] {
         let faces = faces(document, direction)
         guard !faces.isEmpty else { return [] }
         func at(_ h: Int64, _ z: Int64) -> Point2 { view.paper(paperPoint(h, z)) }
         var items: [DisplayItem] = []
+        let grade = faces.map(\.base).min()!
+        let bands = slabBands(document, direction, slabMeshes: slabMeshes, above: grade)
+        for band in bands {
+            let outline = [at(band.h0, band.z0), at(band.h1, band.z0), at(band.h1, band.z1), at(band.h0, band.z1)]
+            items.append(DisplayItem(.hatch(boundary: outline, pattern: .concrete, spacing: .millimeters(1),
+                                            angle: .degrees(45)), style: slabPatternStyle, elementID: band.id))
+            items.append(DisplayItem(.polyline(points: outline, closed: true), style: slabStyle, elementID: band.id))
+        }
         for face in faces {
             let top = face.base + face.wall.height.ticks
             for (h0, h1) in face.visible {
-                items.append(DisplayItem(.polyline(points: [at(h0, face.base), at(h1, face.base), at(h1, top),
-                                                            at(h0, top)], closed: true),
-                                         style: wallStyle, elementID: face.wall.id.rawValue))
+                for (a, b) in wallEdges(h0: h0, h1: h1, base: face.base, top: top, bands: bands) {
+                    items.append(DisplayItem(.line(start: at(a.0, a.1), end: at(b.0, b.1)), style: wallStyle,
+                                             elementID: face.wall.id.rawValue))
+                }
             }
             let a = project(face.wall.start, direction).h
             let sign: Int64 = project(face.wall.end, direction).h >= a ? 1 : -1
@@ -119,7 +130,6 @@ enum ElevationView {
             items.append(DisplayItem(.polyline(points: outline.map { view.paper($0) }, closed: true), style: roofStyle))
         }
         let minH = faces.map(\.h0).min()!, maxH = faces.map(\.h1).max()!
-        let grade = faces.map(\.base).min()!
         let reach = Length.millimeters(1500).ticks
         items.append(DisplayItem(.line(start: at(minH - reach, grade), end: at(maxH + reach, grade)), style: groundStyle))
         // Marks start past the roof's overhang so their lines never cross it.
@@ -136,6 +146,89 @@ enum ElevationView {
                                            alignment: .left), style: levelStyle))
         }
         return items
+    }
+
+    /// A floor slab's edge seen in elevation: its projected extent, a rectangle since slabs are prisms.
+    struct Band {
+        var id: UUID
+        var h0: Int64
+        var h1: Int64
+        var z0: Int64
+        var z1: Int64
+    }
+
+    /// Slab edges from the engine's slab meshes, projected the same way as the roofs. Slabs at or below grade
+    /// are left out; the ground line already stands for them.
+    static func slabBands(_ document: ModelDocument, _ direction: ElevationDirection, slabMeshes: [Mesh],
+                          above grade: Int64) -> [Band] {
+        var bands: [Band] = []
+        for slab in document.slabs {
+            let meshes = slabMeshes.filter { $0.elementID == slab.id.rawValue }
+            guard !meshes.isEmpty else { continue }
+            let outlines = MeshSilhouette.outlines(of: meshes) { point in
+                let (h, _) = project(Point2(x: point.x, y: point.y), direction)
+                return (Double(h), Double(point.z.ticks))
+            }
+            for outline in outlines {
+                let hs = outline.map(\.x.ticks), zs = outline.map(\.y.ticks)
+                guard let z1 = zs.max(), z1 > grade else { continue }
+                bands.append(Band(id: slab.id.rawValue, h0: hs.min()!, h1: hs.max()!, z0: zs.min()!, z1: z1))
+            }
+        }
+        return bands
+    }
+
+    /// The edges of a wall face from h0 to h1 and base to top, leaving out what a slab edge covers or already
+    /// draws, so no line runs through a slab band and none is drawn twice along its edge.
+    static func wallEdges(h0: Int64, h1: Int64, base: Int64, top: Int64, bands: [Band])
+        -> [((Int64, Int64), (Int64, Int64))] {
+        var stations: Set<Int64> = [h0, h1]
+        for band in bands where band.h1 > h0 && band.h0 < h1 {
+            stations.insert(max(band.h0, h0))
+            stations.insert(min(band.h1, h1))
+        }
+        let hs = stations.sorted()
+        // The wall's visible z stretches over each column, and the band edges that bound them there.
+        func cover(_ a: Int64, _ b: Int64) -> [(Int64, Int64)] {
+            let over = bands.filter { $0.h0 <= a && $0.h1 >= b }.map { ($0.z0, $0.z1) }
+            return subtract([(base, top)], over)
+        }
+        func onBand(_ z: Int64, _ a: Int64, _ b: Int64) -> Bool {
+            bands.contains { $0.h0 <= a && $0.h1 >= b && ($0.z0 == z || $0.z1 == z) }
+        }
+        var edges: [((Int64, Int64), (Int64, Int64))] = []
+        var columns: [[(Int64, Int64)]] = []
+        // Horizontal pieces by height, joined where one column's piece runs straight on into the next.
+        var runs: [Int64: [(Int64, Int64)]] = [:]
+        for (a, b) in zip(hs, hs.dropFirst()) {
+            let stretches = cover(a, b)
+            columns.append(stretches)
+            for (z0, z1) in stretches {
+                for z in [z0, z1] where !onBand(z, a, b) {
+                    if let last = runs[z]?.last, last.1 == a {
+                        runs[z]![runs[z]!.count - 1].1 = b
+                    } else {
+                        runs[z, default: []].append((a, b))
+                    }
+                }
+            }
+        }
+        for z in runs.keys.sorted() {
+            for (a, b) in runs[z]! { edges.append(((a, z), (b, z))) }
+        }
+        // Vertical edges where the covered stretches change from one column to the next.
+        for (index, h) in hs.enumerated() {
+            let left = index > 0 ? columns[index - 1] : []
+            let right = index < columns.count ? columns[index] : []
+            let rightOnly = left.reduce(right) { remaining, cut in subtract(remaining, [cut]) }
+            let leftOnly = right.reduce(left) { remaining, cut in subtract(remaining, [cut]) }
+            for (z0, z1) in rightOnly + leftOnly {
+                // A band's own side already draws this edge.
+                let onSide = bands.contains { ($0.h0 == h || $0.h1 == h) && $0.z0 <= z0 && $0.z1 >= z1 }
+                if !onSide { edges.append(((h, z0), (h, z1))) }
+            }
+        }
+        return edges
     }
 
     /// The heights an elevation marks: every floor, then each roof's eave and, when it is pitched, its ridge,
