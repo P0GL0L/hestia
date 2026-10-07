@@ -146,6 +146,80 @@ struct HestiaModel {
                                  kind: .singleDoor, swing: DoorSwing(hinge: .nearStart, opensToward: side))
     }
 
+    /// The door a point of the plan sheet's paper lands on: inside the gap between its jambs, or within 2 mm
+    /// on paper of its drawn symbol (jambs, leaf, and swing). Nil when it lands on no door.
+    func doorHit(paper: Point2) -> OpeningID? {
+        guard let transform = planTransform, let storey = groundStorey else { return nil }
+        let walls = Dictionary(uniqueKeysWithValues: document.walls.filter { $0.storeyID == storey }.map { ($0.id, $0) })
+        let reach = Double(Length.millimeters(2).ticks)
+        for opening in document.openings where opening.kind.isDoor {
+            guard let wall = walls[opening.wallID] else { continue }
+            if Self.contains(gap(opening, in: wall).map(transform.paper), paper) { return opening.id }
+            let symbol = plan.filter { $0.style.layer == "A-DOOR" && $0.elementID == opening.id.rawValue }
+            if symbol.contains(where: { Self.distance(from: paper, to: $0.primitive) <= reach }) { return opening.id }
+        }
+        return nil
+    }
+
+    /// The opening's gap through its wall in model space: its width along the wall, the wall's thickness across.
+    func gap(_ opening: Opening, in wall: Wall) -> [Point2] {
+        let sx = Double(wall.start.x.ticks), sy = Double(wall.start.y.ticks)
+        let dx = Double(wall.end.x.ticks) - sx, dy = Double(wall.end.y.ticks) - sy
+        let length: Double = max((dx * dx + dy * dy).squareRoot(), 1)
+        let (ux, uy) = (dx / length, dy / length)
+        let half = Double(wall.thickness.ticks) / 2
+        let a = Double(opening.offsetAlongWall.ticks), b = a + Double(opening.width.ticks)
+        func at(_ along: Double, _ across: Double) -> Point2 {
+            let x: Double = sx + ux * along - uy * across
+            let y: Double = sy + uy * along + ux * across
+            return Point2(x: Length(ticks: Int64(x.rounded())), y: Length(ticks: Int64(y.rounded())))
+        }
+        return [at(a, -half), at(b, -half), at(b, half), at(a, half)]
+    }
+
+    /// Distance on paper from a point to a drawn line, polyline, or arc; infinite for anything else.
+    static func distance(from point: Point2, to primitive: DisplayPrimitive) -> Double {
+        let px = Double(point.x.ticks), py = Double(point.y.ticks)
+        func segment(_ a: Point2, _ b: Point2) -> Double {
+            let ax = Double(a.x.ticks), ay = Double(a.y.ticks)
+            let dx = Double(b.x.ticks) - ax, dy = Double(b.y.ticks) - ay
+            let lengthSquared: Double = dx * dx + dy * dy
+            let t: Double = lengthSquared > 0 ? max(0, min(1, ((px - ax) * dx + (py - ay) * dy) / lengthSquared)) : 0
+            return hypot(px - (ax + dx * t), py - (ay + dy * t))
+        }
+        switch primitive {
+        case let .line(start, end):
+            return segment(start, end)
+        case let .polyline(points, closed):
+            var pairs = Array(zip(points, points.dropFirst()))
+            if closed, let first = points.first, let last = points.last { pairs.append((last, first)) }
+            return pairs.map { segment($0.0, $0.1) }.min() ?? .infinity
+        case let .arc(center, radius, start, sweep):
+            let cx = Double(center.x.ticks), cy = Double(center.y.ticks), r = Double(radius.ticks)
+            let a0 = Double(start.microDegrees) / 1_000_000 * .pi / 180
+            let sweepRadians = Double(sweep.microDegrees) / 1_000_000 * .pi / 180
+            // Within the swept angle, the distance to the circle; otherwise to the nearer end.
+            var angle: Double = atan2(py - cy, px - cx) - (sweepRadians >= 0 ? a0 : a0 + sweepRadians)
+            while angle < 0 { angle += 2 * .pi }
+            while angle >= 2 * .pi { angle -= 2 * .pi }
+            if angle <= abs(sweepRadians) { return abs(hypot(px - cx, py - cy) - r) }
+            let ends = [a0, a0 + sweepRadians].map { hypot(px - (cx + r * cos($0)), py - (cy + r * sin($0))) }
+            return ends.min()!
+        default:
+            return .infinity
+        }
+    }
+
+    /// Why a wall cannot be removed yet: its openings and the rooms it bounds.
+    func dependents(of wallID: WallID) -> String {
+        let openings = document.openings.filter { $0.wallID == wallID }.count
+        let rooms = document.rooms.filter { $0.boundaryWallIDs.contains(wallID) }.map(\.name)
+        var reasons: [String] = []
+        if openings > 0 { reasons.append(openings == 1 ? "has 1 opening" : "has \(openings) openings") }
+        if !rooms.isEmpty { reasons.append("bounds " + rooms.joined(separator: ", ")) }
+        return reasons.joined(separator: " and ")
+    }
+
     /// Whether a plan point is over the storey's floor: inside one of its slabs, or, with no slab, inside the box
     /// around its walls.
     func onFloor(_ point: Point2, storey: StoreyID) -> Bool {
@@ -236,6 +310,30 @@ struct EditSession {
                 throw HestiaModel.LoadError(message: "The plan has no placement to draw on.")
             }
             try perform(model.doorCommand(on: id, at: point).erased)
+            return true
+        }
+    }
+
+    /// Removes what a point of the plan sheet's paper lands on: a door before the wall it sits in, else the
+    /// wall. A miss does nothing and returns false. A crossing, or a wall with openings or rooms, is refused and
+    /// nothing else is removed to make way.
+    mutating func delete(atPaper paper: Point2) throws -> Bool {
+        if let door = model.doorHit(paper: paper) {
+            try perform(RemoveOpeningCommand(openingID: door).erased)
+            return true
+        }
+        switch model.wallHit(paper: paper) {
+        case .none:
+            return false
+        case .ambiguous:
+            throw HestiaModel.LoadError(message: "That point is on more than one wall. Click clear of the crossing.")
+        case let .wall(id):
+            do {
+                try perform(RemoveWallCommand(wallID: id).erased)
+            } catch CommandValidationError.hasDependents {
+                let reasons = model.dependents(of: id)
+                throw HestiaModel.LoadError(message: "Refused: that wall \(reasons). Remove those first.")
+            }
             return true
         }
     }
