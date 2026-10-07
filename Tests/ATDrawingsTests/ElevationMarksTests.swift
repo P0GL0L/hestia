@@ -38,8 +38,8 @@ private func imperial(_ length: Length) -> String { LengthFormatting.format(leng
 
 @Test func marksReadTheDrawnSilhouetteInProjectUnits() throws {
     var document = try fixture("l-house")
-    document.sheets.append(Sheet(id: SheetID(UUID()), number: "A-201", title: "South", paper: .archD,
-                                 scale: .quarterInch, views: [.elevation(direction: .south)]))
+    document.sheets = [Sheet(id: SheetID(UUID()), number: "A-201", title: "South", paper: .archD,
+                             scale: .quarterInch, views: [.elevation(direction: .south)])]
     let engine = HestiaGeometryEngine()
     let sheets = try SchematicDrawingSet().sheets(for: document, geometry: engine)
     let south = try #require(sheets.first { $0.number == "A-201" })

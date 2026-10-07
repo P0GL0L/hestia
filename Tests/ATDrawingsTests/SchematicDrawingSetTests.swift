@@ -70,6 +70,26 @@ private func sheet(_ number: String, _ sheets: [SheetDrawing]) throws -> SheetDr
     try #require(sheets.first { $0.number == number })
 }
 
+/// Every l-house sheet draws its view through the geometry engine; none says it was not generated.
+@Test func everyLHouseSheetRendersThroughTheEngine() throws {
+    let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        .deletingLastPathComponent().appendingPathComponent("fixtures/l-house.json")
+    let house = try ModelDocument.decode(from: Data(contentsOf: url))
+    let sheets = try SchematicDrawingSet().sheets(for: house, geometry: HestiaGeometryEngine())
+    let numbers: [String] = sheets.map(\.number)
+    #expect(numbers == ["A-000", "A-101", "A-102", "A-201", "A-301", "A-401"])
+    for drawing in sheets {
+        let text = strings(drawing)
+        #expect(!text.contains { $0.contains("not generated") }, "\(drawing.number)")
+    }
+    let elevations = strings(try sheet("A-201", sheets))
+    for name in ["SOUTH ELEVATION", "NORTH ELEVATION", "EAST ELEVATION", "WEST ELEVATION"] {
+        #expect(elevations.contains(name))
+    }
+    #expect(strings(try sheet("A-301", sheets)).contains("BUILDING SECTION"))
+    #expect(strings(try sheet("A-401", sheets)).contains("ROOF PLAN"))
+}
+
 /// Every cottage sheet draws its view through the geometry engine; none says it was not generated.
 @Test func everyCottageSheetRendersThroughTheEngine() throws {
     let sheets = try SchematicDrawingSet().sheets(for: cottage(), geometry: HestiaGeometryEngine())

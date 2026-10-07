@@ -401,6 +401,27 @@
   "schemaVersion" : 1,
   "sheets" : [
     {
+      "id" : "00000000-0000-4000-8000-000000001908",
+      "number" : "A-000",
+      "paper" : {
+        "height" : {
+          "ticks" : 195072
+        },
+        "name" : "ARCH D",
+        "width" : {
+          "ticks" : 292608
+        }
+      },
+      "title" : "Cover",
+      "views" : [
+        {
+          "cover" : {
+
+          }
+        }
+      ]
+    },
+    {
       "id" : "00000000-0000-4000-8000-000000001902",
       "number" : "A-101",
       "paper" : {
@@ -446,6 +467,109 @@
         {
           "floorPlan" : {
             "storeyID" : "00000000-0000-4000-8000-000000001003"
+          }
+        }
+      ]
+    },
+    {
+      "id" : "00000000-0000-4000-8000-000000001909",
+      "number" : "A-201",
+      "paper" : {
+        "height" : {
+          "ticks" : 195072
+        },
+        "name" : "ARCH D",
+        "width" : {
+          "ticks" : 292608
+        }
+      },
+      "title" : "Elevations",
+      "views" : [
+        {
+          "elevation" : {
+            "direction" : "south"
+          }
+        },
+        {
+          "elevation" : {
+            "direction" : "north"
+          }
+        },
+        {
+          "elevation" : {
+            "direction" : "east"
+          }
+        },
+        {
+          "elevation" : {
+            "direction" : "west"
+          }
+        }
+      ]
+    },
+    {
+      "id" : "00000000-0000-4000-8000-000000001910",
+      "number" : "A-301",
+      "paper" : {
+        "height" : {
+          "ticks" : 195072
+        },
+        "name" : "ARCH D",
+        "width" : {
+          "ticks" : 292608
+        }
+      },
+      "scale" : {
+        "label" : "1\/4\" = 1'-0\"",
+        "modelUnitsPerPaperUnit" : 48
+      },
+      "title" : "Building Section",
+      "views" : [
+        {
+          "section" : {
+            "line" : {
+              "end" : {
+                "x" : {
+                  "ticks" : 384000
+                },
+                "y" : {
+                  "ticks" : 3680000
+                }
+              },
+              "start" : {
+                "x" : {
+                  "ticks" : 384000
+                },
+                "y" : {
+                  "ticks" : -480000
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id" : "00000000-0000-4000-8000-000000001911",
+      "number" : "A-401",
+      "paper" : {
+        "height" : {
+          "ticks" : 195072
+        },
+        "name" : "ARCH D",
+        "width" : {
+          "ticks" : 292608
+        }
+      },
+      "scale" : {
+        "label" : "1\/4\" = 1'-0\"",
+        "modelUnitsPerPaperUnit" : 48
+      },
+      "title" : "Roof Plan",
+      "views" : [
+        {
+          "roofPlan" : {
+
           }
         }
       ]

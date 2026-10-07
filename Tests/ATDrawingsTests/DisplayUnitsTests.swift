@@ -33,7 +33,7 @@ private func lHouseWithViews() throws -> ModelDocument {
                         views: [.section(line: line)])
     let elevation = Sheet(id: SheetID(UUID()), number: "A-201", title: "Elevation", paper: .archD,
                           scale: .quarterInch, views: [.elevation(direction: .south)])
-    document.sheets += [section, elevation]
+    document.sheets = [section, elevation]
     return document
 }
 
