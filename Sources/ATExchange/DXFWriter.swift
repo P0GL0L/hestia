@@ -78,7 +78,8 @@ public enum SchematicWallOutlineDXF {
     }
 }
 
-private struct DXFDocumentWriter {
+/// Writes an ASCII DXF R2013 document section by section. Shared by the wall-outline and display-list exports.
+struct DXFDocumentWriter {
     var units: DXFDrawingUnits
     private(set) var asciiDXF = ""
     private var handleCounter: UInt64 = 0x10
@@ -140,6 +141,79 @@ private struct DXFDocumentWriter {
             appendLine(code: 10, value: format(vertex.x))
             appendLine(code: 20, value: format(vertex.y))
         }
+    }
+
+    mutating func writeLine(layer: String, from a: (x: Double, y: Double), to b: (x: Double, y: Double),
+                            lineweight: Int) {
+        appendLine(code: 0, value: "LINE")
+        appendLine(code: 5, value: nextHandle())
+        appendLine(code: 100, value: "AcDbEntity")
+        appendLine(code: 8, value: layer)
+        appendLine(code: 370, value: "\(lineweight)")
+        appendLine(code: 100, value: "AcDbLine")
+        appendLine(code: 10, value: format(a.x))
+        appendLine(code: 20, value: format(a.y))
+        appendLine(code: 30, value: "0")
+        appendLine(code: 11, value: format(b.x))
+        appendLine(code: 21, value: format(b.y))
+        appendLine(code: 31, value: "0")
+    }
+
+    mutating func writePolyline(layer: String, vertices: [(x: Double, y: Double)], closed: Bool, lineweight: Int) {
+        guard vertices.count >= 2 else { return }
+        appendLine(code: 0, value: "LWPOLYLINE")
+        appendLine(code: 5, value: nextHandle())
+        appendLine(code: 100, value: "AcDbEntity")
+        appendLine(code: 8, value: layer)
+        appendLine(code: 370, value: "\(lineweight)")
+        appendLine(code: 100, value: "AcDbPolyline")
+        appendLine(code: 90, value: "\(vertices.count)")
+        appendLine(code: 70, value: closed ? "1" : "0")
+        for vertex in vertices {
+            appendLine(code: 10, value: format(vertex.x))
+            appendLine(code: 20, value: format(vertex.y))
+        }
+    }
+
+    /// An arc running counterclockwise from `startDegrees` to `endDegrees`, as DXF requires.
+    mutating func writeArc(layer: String, center: (x: Double, y: Double), radius: Double, startDegrees: Double,
+                           endDegrees: Double, lineweight: Int) {
+        appendLine(code: 0, value: "ARC")
+        appendLine(code: 5, value: nextHandle())
+        appendLine(code: 100, value: "AcDbEntity")
+        appendLine(code: 8, value: layer)
+        appendLine(code: 370, value: "\(lineweight)")
+        appendLine(code: 100, value: "AcDbCircle")
+        appendLine(code: 10, value: format(center.x))
+        appendLine(code: 20, value: format(center.y))
+        appendLine(code: 30, value: "0")
+        appendLine(code: 40, value: format(radius))
+        appendLine(code: 100, value: "AcDbArc")
+        appendLine(code: 50, value: format(startDegrees))
+        appendLine(code: 51, value: format(endDegrees))
+    }
+
+    /// Text set at its insertion point, rotated, and justified left (0), center (1), or right (2).
+    mutating func writeText(layer: String, at point: (x: Double, y: Double), height: Double, rotationDegrees: Double,
+                            justification: Int, value: String) {
+        appendLine(code: 0, value: "TEXT")
+        appendLine(code: 5, value: nextHandle())
+        appendLine(code: 100, value: "AcDbEntity")
+        appendLine(code: 8, value: layer)
+        appendLine(code: 100, value: "AcDbText")
+        appendLine(code: 10, value: format(point.x))
+        appendLine(code: 20, value: format(point.y))
+        appendLine(code: 30, value: "0")
+        appendLine(code: 40, value: format(height))
+        appendLine(code: 1, value: value)
+        appendLine(code: 50, value: format(rotationDegrees))
+        if justification != 0 {
+            appendLine(code: 72, value: "\(justification)")
+            appendLine(code: 11, value: format(point.x))
+            appendLine(code: 21, value: format(point.y))
+            appendLine(code: 31, value: "0")
+        }
+        appendLine(code: 100, value: "AcDbText")
     }
 
     mutating func writeText(
