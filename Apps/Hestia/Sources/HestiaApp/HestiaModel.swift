@@ -81,6 +81,98 @@ struct HestiaModel {
                               height: template.height)
     }
 
+    /// What a point of the plan sheet's paper lands on: the drawn wall outlines that contain it.
+    enum WallHit: Equatable {
+        case none
+        case wall(WallID)
+        /// Inside more than one wall's outline, as where walls cross: which one is meant cannot be told.
+        case ambiguous([WallID])
+    }
+
+    func wallHit(paper: Point2) -> WallHit {
+        var hits: [WallID] = []
+        for item in plan where item.style.layer == "A-WALL" {
+            guard case let .polyline(points, true) = item.primitive, let id = item.elementID,
+                  Self.contains(points, paper) else { continue }
+            let wall = WallID(id)
+            if !hits.contains(wall) { hits.append(wall) }
+        }
+        switch hits.count {
+        case 0: return .none
+        case 1: return .wall(hits[0])
+        default: return .ambiguous(hits)
+        }
+    }
+
+    /// A single door in a wall, centered on a model point projected onto the wall's centerline, with a new ID.
+    /// Its width, height, and sill come from a door already on that storey; it hinges at the start-side jamb
+    /// and swings to whichever side of the wall its open leaf lands on the floor. The offset is rounded to a
+    /// whole inch, or 10 mm on a metric project.
+    func doorCommand(on wallID: WallID, at point: Point2, id: OpeningID = OpeningID(UUID())) throws -> AddOpeningCommand {
+        guard let wall = document.walls.first(where: { $0.id == wallID }) else {
+            throw LoadError(message: "That wall is not in the model.")
+        }
+        let storeyWalls = Set(document.walls.filter { $0.storeyID == wall.storeyID }.map(\.id))
+        guard let model = document.openings.first(where: { $0.kind.isDoor && storeyWalls.contains($0.wallID) }) else {
+            throw LoadError(message: "There is no door on this storey to copy a size from.")
+        }
+        let sx = Double(wall.start.x.ticks), sy = Double(wall.start.y.ticks)
+        let dx = Double(wall.end.x.ticks) - sx, dy = Double(wall.end.y.ticks) - sy
+        let length: Double = (dx * dx + dy * dy).squareRoot()
+        let width = Double(model.width.ticks)
+        guard length > width else { throw LoadError(message: "That wall is shorter than a door.") }
+        let (ux, uy) = (dx / length, dy / length)
+        let along: Double = (Double(point.x.ticks) - sx) * ux + (Double(point.y.ticks) - sy) * uy
+        let step = Double(document.project.displayUnits == .metric ? Length.millimeters(10).ticks : Length.inches(1).ticks)
+        let offset: Double = min(max(((along - width / 2) / step).rounded() * step, 0), length - width)
+        // The open leaf's tip, a door's width out from the wall face at the door's middle.
+        let middle: Double = offset + width / 2
+        let reach: Double = Double(wall.thickness.ticks) / 2 + width
+        func tip(_ side: Double) -> Point2 {
+            let x: Double = sx + ux * middle - uy * reach * side
+            let y: Double = sy + uy * middle + ux * reach * side
+            return Point2(x: Length(ticks: Int64(x.rounded())), y: Length(ticks: Int64(y.rounded())))
+        }
+        let side: DoorSwing.Side
+        if onFloor(tip(1), storey: wall.storeyID) {
+            side = .left
+        } else if onFloor(tip(-1), storey: wall.storeyID) {
+            side = .right
+        } else {
+            throw LoadError(message: "Neither side of that wall is inside the building.")
+        }
+        return AddOpeningCommand(openingID: id, wallID: wallID, offsetAlongWall: Length(ticks: Int64(offset)),
+                                 width: model.width, height: model.height, sillHeight: model.sillHeight,
+                                 kind: .singleDoor, swing: DoorSwing(hinge: .nearStart, opensToward: side))
+    }
+
+    /// Whether a plan point is over the storey's floor: inside one of its slabs, or, with no slab, inside the box
+    /// around its walls.
+    func onFloor(_ point: Point2, storey: StoreyID) -> Bool {
+        let slabs = document.slabs.filter { $0.storeyID == storey }
+        if !slabs.isEmpty {
+            return slabs.contains { Self.contains($0.outline, point) }
+        }
+        let ends = document.walls.filter { $0.storeyID == storey }.flatMap { [$0.start, $0.end] }
+        guard let x0 = ends.map(\.x.ticks).min(), let x1 = ends.map(\.x.ticks).max(),
+              let y0 = ends.map(\.y.ticks).min(), let y1 = ends.map(\.y.ticks).max() else { return false }
+        return point.x.ticks > x0 && point.x.ticks < x1 && point.y.ticks > y0 && point.y.ticks < y1
+    }
+
+    /// Whether a point lies inside a polygon, by ray casting.
+    static func contains(_ polygon: [Point2], _ point: Point2) -> Bool {
+        let px = Double(point.x.ticks), py = Double(point.y.ticks)
+        var inside = false
+        for (a, b) in zip(polygon, polygon.dropFirst() + polygon.prefix(1)) {
+            let ay = Double(a.y.ticks), by = Double(b.y.ticks)
+            guard (ay > py) != (by > py) else { continue }
+            let ax = Double(a.x.ticks), bx = Double(b.x.ticks)
+            let x: Double = ax + (py - ay) / (by - ay) * (bx - ax)
+            if px < x { inside.toggle() }
+        }
+        return inside
+    }
+
     /// The whole schematic set as one PDF, a page per sheet, at true scale.
     func pdf() throws -> Data {
         try SheetPDFExporter().export(.sheets(sheets))
@@ -129,6 +221,23 @@ struct EditSession {
             throw HestiaModel.LoadError(message: "The plan has no placement to draw on.")
         }
         try perform(model.wallCommand(from: a, to: b).erased)
+    }
+
+    /// Adds a single door where a point of the plan sheet's paper falls on a drawn wall. A point off every wall
+    /// does nothing and returns false; a point on more than one wall is refused.
+    mutating func addDoor(atPaper paper: Point2) throws -> Bool {
+        switch model.wallHit(paper: paper) {
+        case .none:
+            return false
+        case .ambiguous:
+            throw HestiaModel.LoadError(message: "That point is on more than one wall. Click clear of the crossing.")
+        case let .wall(id):
+            guard let point = model.modelPoint(paper: paper) else {
+                throw HestiaModel.LoadError(message: "The plan has no placement to draw on.")
+            }
+            try perform(model.doorCommand(on: id, at: point).erased)
+            return true
+        }
     }
 
     /// Applies a command, keeping its inverse.
