@@ -23,6 +23,11 @@ public struct SVGWriter: Sendable {
 
 private struct SVGBuilder {
     var scale: DrawingScale
+
+    init(scale: DrawingScale) {
+        self.scale = scale
+    }
+
     private var order: [String] = []
     private var markup: [String: String] = [:]
     private var defs = ""
