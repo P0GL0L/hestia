@@ -71,10 +71,12 @@ enum FloorPlanView {
         return items
     }
 
-    /// The room's centerline polygon: where each boundary wall's line meets the next one's, in boundary order.
-    /// Nil when fewer than three corners can be found.
-    static func roomPolygon(_ walls: [Wall]) -> [Point2]? {
-        guard walls.count >= 3 else { return nil }
+    /// The room's centerline polygon: where each boundary wall's line meets the next one's, walking around
+    /// the room (`RoomWalk`), or in boundary order when the walls do not close. Nil when fewer than three
+    /// corners can be found.
+    static func roomPolygon(_ boundary: [Wall]) -> [Point2]? {
+        guard boundary.count >= 3 else { return nil }
+        let walls: [Wall] = RoomWalk.ordered(boundary) ?? boundary
         var corners: [Point2] = []
         for (a, b) in zip(walls, walls.dropFirst() + walls.prefix(1)) {
             let (ax, ay) = (Double(a.start.x.ticks), Double(a.start.y.ticks))
