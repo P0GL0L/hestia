@@ -87,7 +87,8 @@ public struct SchematicDrawingSet: DrawingGenerator {
             let reserve = DimensionChains.reserve
             let scale = placed.transform.scale
             let outlines = try geometry.planView(of: document, storey: storeyID)
-            let areas = try geometry.roomAreas(of: document, storey: storeyID)
+            // The engine meets each wall's line with the next one's, so give it the walls walking around.
+            let areas = try geometry.roomAreas(of: RoomWalk.walked(document), storey: storeyID)
             var stairsBelow: [ClassifiedOutline] = []
             if let below = Self.storey(below: storeyID, in: document) {
                 stairsBelow = try geometry.planView(of: document, storey: below.id).filter { $0.kind == .stair }
@@ -119,8 +120,9 @@ public struct SchematicDrawingSet: DrawingGenerator {
         case let .schedule(kind):
             var areas: [RoomID: Area] = [:]
             if kind == .areas {
+                let walked = RoomWalk.walked(document)
                 for storey in document.storeys {
-                    areas.merge(try geometry.roomAreas(of: document, storey: storey.id)) { first, _ in first }
+                    areas.merge(try geometry.roomAreas(of: walked, storey: storey.id)) { first, _ in first }
                 }
             }
             guard let table = ScheduleView.table(kind, document: document, style: units, areas: areas) else {
