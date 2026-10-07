@@ -21,6 +21,10 @@ enum LHouse {
     /// Counterclockwise L: a 10 m × 6 m south wing and a 5 m × 4 m north-west wing.
     static let footprint = [mm(0, 0), mm(10000, 0), mm(10000, 6000), mm(5000, 6000), mm(5000, 10000), mm(0, 10000)]
 
+    /// The footprint moved out 150 mm to the outer face of the 300 mm exterior walls, so slab edges reach it.
+    static let slabOutline = [mm(-150, -150), mm(10150, -150), mm(10150, 6150), mm(5150, 6150), mm(5150, 10150),
+                              mm(-150, 10150)]
+
     static func commands() -> [AnyCommand] {
         var list: [AnyCommand] = [
             SetProjectUnitsCommand(projectID: project, units: .metric).erased,
@@ -60,7 +64,7 @@ enum LHouse {
                 AddRoomCommand(roomID: RoomID(newID()), storeyID: storey, name: isGround ? "Hall" : "Landing",
                                boundaryWallIDs: [partition, exterior[3], exterior[4], exterior[5]]).erased,
                 AddSlabCommand(slabID: SlabID(newID()), storeyID: storey, kind: isGround ? .foundation : .floor,
-                               outline: footprint, thickness: .millimeters(isGround ? 150 : 250)).erased,
+                               outline: slabOutline, thickness: .millimeters(isGround ? 150 : 250)).erased,
             ]
             if isGround {
                 list += [
