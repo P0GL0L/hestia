@@ -88,99 +88,57 @@ enum ElementMeshes {
 
     // MARK: - Roofs
 
-    /// Roof surfaces. A convex footprint gets each pitched plane where it is the lowest, rising from its outer
-    /// eave, with vertical gable ends where an edge has no pitch. A rectilinear footprint that is not convex is
-    /// covered by the hip roofs of its largest rectangles, whose overlap forms the valleys. Anything else gets a
-    /// flat cap at the eave.
+    /// Roof surfaces, patch by patch (see `RoofPatch`): each pitched plane where it is the lowest, rising from
+    /// its outer eave, with vertical gable ends where an edge has no pitch. Where rectangle patches overlap they
+    /// form the valleys. A flat patch is a 250 mm cap at the eave.
     static func roof(_ roof: Roof, base: Double) -> [Mesh] {
-        let eave = base + Double(roof.eaveHeight.ticks)
-        var footprint = roof.footprint.map(Vec.init)
-        var planes = roof.planes
-        if PolygonMath.twiceSignedArea(footprint) < 0 {
-            footprint.reverse()
-            let flipped: [RoofPlane] = planes.reversed()
-            planes = Array(flipped.dropFirst()) + Array(flipped.prefix(1))
-        }
         var builder = MeshBuilder()
-        if isConvex(footprint) {
-            envelope(footprint, planes: planes, eave: eave, into: &builder)
-        } else if isRectilinear(footprint) {
-            let pitch = planes.compactMap(\.pitchRisePer12).max()
-            for rect in maximalRectangles(footprint) {
-                let box = [Vec(rect.0, rect.2), Vec(rect.1, rect.2), Vec(rect.1, rect.3), Vec(rect.0, rect.3)]
-                let boxPlanes = zip(box, box.dropFirst() + box.prefix(1)).map { a, b in
-                    RoofPlane(pitchRisePer12: pitch, overhang: Length(ticks: Int64(overhang(on: (a, b), footprint: footprint,
-                                                                                             planes: planes).rounded())))
-                }
-                envelope(box, planes: boxPlanes, eave: eave, into: &builder)
+        for patch in RoofPatch.patches(of: roof, base: base) {
+            if patch.isFlat {
+                builder.prism(patch.outer, bottom: patch.eave, top: patch.eave + RoofPatch.thickness)
+            } else {
+                envelope(patch, into: &builder)
             }
-        } else {
-            builder.prism(footprint, bottom: eave, top: eave + Double(Length.millimeters(250).ticks))
         }
         return [builder.mesh(elementID: roof.id.rawValue, material: "roof")].compactMap { $0 }
     }
 
-    /// Lower envelope of the pitched planes over a convex footprint pushed out by each edge's overhang.
-    static func envelope(_ footprint: [Vec], planes: [RoofPlane], eave: Double, into builder: inout MeshBuilder) {
-        let count = footprint.count
-        guard count >= 3, planes.count == count else { return }
-        let twelve = Double(Length.inches(12).ticks)
-        // Outer eave lines.
-        var lines: [(origin: Vec, direction: Vec)] = []
-        for i in 0..<count {
-            let a = footprint[i], b = footprint[(i + 1) % count]
-            let d = (b - a) * (1 / max((b - a).length, 1))
-            lines.append((a - d.leftNormal * Double(planes[i].overhang.ticks), d))
-        }
-        var outer: [Vec] = []
-        for i in 0..<count {
-            let p = lines[(i - 1 + count) % count], q = lines[i]
-            let denominator = p.direction.cross(q.direction)
-            outer.append(abs(denominator) < 1e-9 ? q.origin
-                         : p.origin + p.direction * ((q.origin - p.origin).cross(q.direction) / denominator))
-        }
-        let slopes = planes.map { $0.pitchRisePer12.map { Double($0.ticks) / twelve } }
-        func height(_ i: Int, _ p: Vec) -> Double {
-            eave + (slopes[i] ?? 0) * lines[i].direction.cross(p - lines[i].origin)
-        }
-        let pitched = slopes.indices.filter { (slopes[$0] ?? 0) > 0 }
-        guard !pitched.isEmpty else {
-            builder.prism(outer, bottom: eave, top: eave + Double(Length.millimeters(250).ticks))
-            return
-        }
-        func surface(_ p: Vec) -> Double { pitched.map { height($0, p) }.min()! }
+    /// Each pitched plane where it is the lowest over the patch, and vertical gable ends under unpitched edges.
+    static func envelope(_ patch: RoofPatch, into builder: inout MeshBuilder) {
+        let outer = patch.outer, count = outer.count
+        let pitched = patch.pitched
         for i in pitched {
             var region = outer
             for j in pitched where j != i {
-                region = PolygonMath.clip(region, keepingBelow: 0) { height(i, $0) - height(j, $0) }
+                region = PolygonMath.clip(region, keepingBelow: 0) { patch.height(i, $0) - patch.height(j, $0) }
             }
             guard region.count >= 3, abs(PolygonMath.twiceSignedArea(region)) > 1 else { continue }
-            let d = lines[i].direction, k = slopes[i]!
+            let d = patch.lines[i].direction, k = patch.slopes[i]!
             let normal = (k * d.y, -k * d.x, 1.0)
-            let points = region.map { ($0.x, $0.y, height(i, $0)) }
+            let points = region.map { ($0.x, $0.y, patch.height(i, $0)) }
             builder.face(points, normal: normal)
             builder.face(points.reversed(), normal: (-normal.0, -normal.1, -normal.2))
         }
         // Gable ends: vertical faces under the roof along edges without a pitch.
-        for i in slopes.indices where slopes[i] == nil {
+        for i in patch.slopes.indices where patch.slopes[i] == nil {
             let a = outer[i], b = outer[(i + 1) % count]
             let d = b - a
             let length = d.length
             guard length > 0 else { continue }
             let u = d * (1 / length)
             var stops = [0.0, length]
+            // Where any two planes' ridge crosses this edge.
             for j in pitched {
-                // Where plane j's ridge lines cross this edge: sample the edge at every plane-pair crossing.
                 for k in pitched where k > j {
-                    let fa = height(j, a) - height(k, a), fb = height(j, b) - height(k, b)
+                    let fa = patch.height(j, a) - patch.height(k, a), fb = patch.height(j, b) - patch.height(k, b)
                     if (fa < 0) != (fb < 0), fa != fb { stops.append(length * fa / (fa - fb)) }
                 }
             }
             let points = stops.sorted().map { t -> (Double, Double, Double) in
                 let p = a + u * t
-                return (p.x, p.y, surface(p))
+                return (p.x, p.y, patch.surface(p))
             }
-            let outline = [(a.x, a.y, eave)] + points + [(b.x, b.y, eave)]
+            let outline = [(a.x, a.y, patch.eave)] + points + [(b.x, b.y, patch.eave)]
             let outward = (u.y, -u.x, 0.0)
             builder.face(outline, normal: outward)
             builder.face(outline.reversed(), normal: (-outward.0, -outward.1, 0))

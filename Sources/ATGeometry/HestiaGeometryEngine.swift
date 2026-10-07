@@ -82,8 +82,9 @@ public struct HestiaGeometryEngine: GeometryEngine {
         return meshes
     }
 
+    /// A section looking to the left of the line; see `SectionCut`. A zero-length line has no section.
     public func section(of document: ModelDocument, along line: SectionLine) throws -> [ClassifiedOutline] {
-        []
+        try SectionCut(document: document, line: line)?.outlines() ?? []
     }
 
     // MARK: - Plan pieces
