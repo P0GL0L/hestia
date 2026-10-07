@@ -19,6 +19,9 @@ enum RectCottage {
     static let storey = StoreyID(id(2))
     static let walls = (11...17).map { WallID(id($0)) }
 
+    /// The building section: across the cottage at x = 18'-0", from 3'-0" south of it to 3'-3" north of it.
+    static let crossSection = SectionLine(start: at(ft(18), ft(-3)), end: at(ft(18), ft(26)))
+
     // Centerlines: 6" walls around interiors 14' + 10' + 12' wide and 12' + 10' deep.
     static let left = Length.inches(-3), v1 = ft(14, 3), v2 = ft(24, 9), right = ft(37, 3)
     static let bottom = Length.inches(-3), mid = ft(12, 3), top = ft(22, 9)
@@ -88,12 +91,19 @@ enum RectCottage {
             AddRoofCommand(roofID: RoofID(id(62)), storeyID: storey,
                            footprint: [at(left, bottom), at(right, bottom), at(right, top), at(left, top)],
                            eaveHeight: height, pitchRisePer12: .inches(6), overhang: ft(1)).erased,
+            AddSheetCommand(sheetID: SheetID(id(73)), number: "A-000", title: "Cover", paper: .archD, scale: nil,
+                            views: [.cover]).erased,
             AddSheetCommand(sheetID: SheetID(id(70)), number: "A-101", title: "Floor Plan", paper: .archD,
                             scale: .quarterInch, views: [.floorPlan(storeyID: storey)]).erased,
             AddSheetCommand(sheetID: SheetID(id(71)), number: "A-201", title: "Elevations", paper: .archD,
                             scale: .quarterInch, views: [.elevation(direction: .south), .elevation(direction: .north),
                                     .elevation(direction: .east), .elevation(direction: .west)])
                 .erased,
+            // North to south through the kitchen window and the bath window, looking west.
+            AddSheetCommand(sheetID: SheetID(id(74)), number: "A-301", title: "Building Section", paper: .archD,
+                            scale: .quarterInch, views: [.section(line: crossSection)]).erased,
+            AddSheetCommand(sheetID: SheetID(id(75)), number: "A-401", title: "Roof Plan", paper: .archD,
+                            scale: .quarterInch, views: [.roofPlan]).erased,
             AddSheetCommand(sheetID: SheetID(id(72)), number: "A-601", title: "Schedules", paper: .archD, scale: nil,
                             views: [.schedule(kind: .doors), .schedule(kind: .windows)]).erased,
         ]
@@ -133,6 +143,14 @@ enum RectCottage {
     let roof = try #require(cottage.roofs.first)
     #expect(roof.planes.count == 4)
     #expect(roof.planes.allSatisfy { $0.pitchRisePer12 == .inches(6) })
+    // The set: cover, plan, elevations, one section, roof plan, schedules.
+    let numbers: [String] = cottage.sheets.map(\.number)
+    #expect(numbers == ["A-000", "A-101", "A-201", "A-301", "A-401", "A-601"])
+    let sections = cottage.sheets.flatMap(\.views).filter { view in
+        if case .section = view { return true }
+        return false
+    }
+    #expect(sections.count == 1)
     #expect(cottage.stairs.count == 1)
     #expect(cottage.openings.filter { $0.kind.isDoor }.count == 6)
     let elevations = cottage.sheets.flatMap(\.views).compactMap { view -> ElevationDirection? in

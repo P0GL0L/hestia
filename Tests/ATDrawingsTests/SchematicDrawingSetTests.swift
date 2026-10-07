@@ -49,7 +49,8 @@ private func strings(_ sheet: SheetDrawing) -> [String] {
 
 @Test func cottageSheetSetFollowsTheModelSheets() throws {
     let sheets = try SchematicDrawingSet(issueDate: "2026-10-06").sheets(for: cottage(), geometry: OutlinerGeometry())
-    #expect(sheets.map(\.number) == ["A-101", "A-201", "A-601"])
+    let numbers: [String] = sheets.map(\.number)
+    #expect(numbers == ["A-000", "A-101", "A-201", "A-301", "A-401", "A-601"])
     for sheet in sheets {
         let text = strings(sheet)
         #expect(text.contains("SCHEMATIC"))
@@ -61,13 +62,29 @@ private func strings(_ sheet: SheetDrawing) -> [String] {
         #expect(bounds.min.x.ticks >= 0 && bounds.min.y.ticks >= 0)
         #expect(bounds.max.x <= sheet.paper.width && bounds.max.y <= sheet.paper.height)
     }
-    #expect(strings(sheets[1]).contains("SOUTH ELEVATION"))
-    #expect(strings(sheets[2]).contains("DOOR SCHEDULE"))
+    #expect(strings(try sheet("A-201", sheets)).contains("SOUTH ELEVATION"))
+    #expect(strings(try sheet("A-601", sheets)).contains("DOOR SCHEDULE"))
+}
+
+private func sheet(_ number: String, _ sheets: [SheetDrawing]) throws -> SheetDrawing {
+    try #require(sheets.first { $0.number == number })
+}
+
+/// Every cottage sheet draws its view through the geometry engine; none says it was not generated.
+@Test func everyCottageSheetRendersThroughTheEngine() throws {
+    let sheets = try SchematicDrawingSet().sheets(for: cottage(), geometry: HestiaGeometryEngine())
+    for drawing in sheets {
+        let text = strings(drawing)
+        #expect(!text.contains { $0.contains("not generated") }, "\(drawing.number)")
+    }
+    #expect(strings(try sheet("A-000", sheets)).contains("SHEET INDEX"))
+    #expect(strings(try sheet("A-301", sheets)).contains("BUILDING SECTION"))
+    #expect(strings(try sheet("A-401", sheets)).contains("ROOF PLAN"))
 }
 
 @Test func cottagePlanDrawsWallsOpeningsAndRoomTags() throws {
     let document = try cottage()
-    let plan = try SchematicDrawingSet().sheets(for: document, geometry: OutlinerGeometry())[0]
+    let plan = try sheet("A-101", SchematicDrawingSet().sheets(for: document, geometry: OutlinerGeometry()))
     let items = plan.content.items
     let wallIDs = Set(document.walls.map(\.id.rawValue))
     let walls = items.filter { $0.style.layer == "A-WALL" && wallIDs.contains($0.elementID ?? UUID()) }
@@ -84,7 +101,7 @@ private func strings(_ sheet: SheetDrawing) -> [String] {
 
 @Test func planPrintsTrueToScale() throws {
     let document = try cottage()
-    let plan = try SchematicDrawingSet().sheets(for: document, geometry: OutlinerGeometry())[0]
+    let plan = try sheet("A-101", SchematicDrawingSet().sheets(for: document, geometry: OutlinerGeometry()))
     // The south wall is 38'-0" long outside to outside: 9 1/2" on paper at 1/4" = 1'-0".
     let south = try #require(plan.content.items.first { $0.elementID == document.walls[0].id.rawValue
         && $0.style.layer == "A-WALL" })
@@ -143,7 +160,7 @@ private func strings(_ sheet: SheetDrawing) -> [String] {
     let sheets = try SchematicDrawingSet().sheets(for: cottage(), geometry: OutlinerGeometry())
     let pdf = try SheetPDFExporter().export(.sheets(sheets))
     let text = String(decoding: pdf, as: UTF8.self)
-    #expect(text.contains("/Count 3"))
+    #expect(text.contains("/Count 6"))
     #expect(text.contains("(NOT FOR CONSTRUCTION) Tj"))
     #expect(throws: ExchangeError.unsupportedPayload(format: "pdf")) {
         try SheetPDFExporter().export(.meshes([], materials: []))
