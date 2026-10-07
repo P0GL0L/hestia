@@ -39,14 +39,14 @@ struct ContentView: View {
 
     var body: some View {
         if let session {
-            editor(session.model)
+            editor(session.model, sessionID: session.id)
         } else {
             Text(loadError ?? "No model loaded.")
                 .padding()
         }
     }
 
-    private func editor(_ model: HestiaModel) -> some View {
+    private func editor(_ model: HestiaModel, sessionID: UUID) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(model.document.project.name)
@@ -60,7 +60,7 @@ struct ContentView: View {
                            onClick: { paper in click(paper) })
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.white)
-                OrbitScene(meshes: model.meshes)
+                OrbitScene(meshes: model.meshes, sessionID: sessionID)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             HStack {
