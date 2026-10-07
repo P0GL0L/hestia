@@ -2,52 +2,37 @@ import ATContracts
 import SwiftUI
 
 /// The floor plan as the drawing set draws it: walls with their hatch, door swings, glazing, stairs, floor
-/// openings, and room tags, fitted to the view. Items are in sheet paper space.
+/// openings, and room tags, fitted to the view. Items are in sheet paper space. A click reports the paper point
+/// under it; `pendingStart`, a paper point, is marked while a wall waits for its end.
 struct PlanCanvas: View {
     var items: [DisplayItem]
+    var pendingStart: Point2?
+    var onClick: (Point2) -> Void
 
     var body: some View {
-        Canvas { context, size in
-            guard let bounds = DisplayList(items: items).bounds else { return }
-            let fit = Fit(bounds: bounds, size: size)
-            for item in items {
-                draw(item, in: &context, fit: fit)
+        GeometryReader { proxy in
+            let fit = DisplayList(items: items).bounds.map { PlanFit(bounds: $0, size: proxy.size) }
+            Canvas { context, _ in
+                guard let fit else { return }
+                for item in items {
+                    draw(item, in: &context, fit: fit)
+                }
+                if let start = pendingStart {
+                    let p = fit.point(start)
+                    let mark = Path(ellipseIn: CGRect(x: p.x - 4, y: p.y - 4, width: 8, height: 8))
+                    context.stroke(mark, with: .color(.orange), lineWidth: 2)
+                }
             }
+            .contentShape(Rectangle())
+            // A press and release without moving: the package's macOS target has DragGesture, not located taps.
+            .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .local).onEnded { value in
+                guard let fit else { return }
+                onClick(fit.paper(value.location))
+            })
         }
     }
 
-    /// Paper space to view points: centered, y up, with a margin.
-    struct Fit {
-        var minX: Double
-        var minY: Double
-        var scale: Double
-        var originX: Double
-        var originY: Double
-        var height: Double
-
-        init(bounds: (min: Point2, max: Point2), size: CGSize) {
-            minX = Double(bounds.min.x.ticks)
-            minY = Double(bounds.min.y.ticks)
-            let width = max(Double(bounds.max.x.ticks) - minX, 1)
-            let depth = max(Double(bounds.max.y.ticks) - minY, 1)
-            scale = min(Double(size.width) / width, Double(size.height) / depth) * 0.9
-            originX = (Double(size.width) - width * scale) / 2
-            originY = (Double(size.height) - depth * scale) / 2
-            height = Double(size.height)
-        }
-
-        func point(_ p: Point2) -> CGPoint {
-            point(Double(p.x.ticks), Double(p.y.ticks))
-        }
-
-        func point(_ x: Double, _ y: Double) -> CGPoint {
-            CGPoint(x: originX + (x - minX) * scale, y: height - (originY + (y - minY) * scale))
-        }
-
-        func points(_ length: Length) -> Double { Double(length.ticks) * scale }
-    }
-
-    private func draw(_ item: DisplayItem, in context: inout GraphicsContext, fit: Fit) {
+    private func draw(_ item: DisplayItem, in context: inout GraphicsContext, fit: PlanFit) {
         let style = stroke(item.style, fit: fit)
         switch item.primitive {
         case let .line(start, end):
@@ -89,7 +74,7 @@ struct PlanCanvas: View {
         }
     }
 
-    private func polyline(_ points: [Point2], closed: Bool, fit: Fit) -> Path {
+    private func polyline(_ points: [Point2], closed: Bool, fit: PlanFit) -> Path {
         var path = Path()
         guard let first = points.first else { return path }
         path.move(to: fit.point(first))
@@ -99,7 +84,7 @@ struct PlanCanvas: View {
     }
 
     /// The pen's printed width, at the view's scale, never thinner than half a point.
-    private func stroke(_ style: DisplayStyle, fit: Fit) -> StrokeStyle {
+    private func stroke(_ style: DisplayStyle, fit: PlanFit) -> StrokeStyle {
         let pen = Length(ticks: Int64(style.pen.rawValue) * Length.ticksPerMillimeter / 100)
         let width = max(fit.points(pen), 0.5)
         switch style.pattern {
