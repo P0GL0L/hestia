@@ -5,7 +5,8 @@ import Foundation
 ///
 /// Plan view: walls on the storey are joined (L, T, X, any angle) and cut at doors and windows that the plan
 /// cut plane passes through; walls lower than the cut plane, and columns and stairs, are classified to match.
-/// Room areas come from each room's boundary walls, measured face to face.
+/// Room areas come from each room's boundary walls, measured face to face. Meshes cover walls, openings,
+/// slabs, columns, beams, stairs, and roofs.
 public struct HestiaGeometryEngine: GeometryEngine {
     /// Height of the plan cut plane above the storey floor: 4'-0".
     public var planCutHeight: Length
@@ -59,8 +60,26 @@ public struct HestiaGeometryEngine: GeometryEngine {
         return areas
     }
 
+    /// Walls (pieces between openings, sills, heads, glass, and door leaves), slabs, columns, beams, stairs, and
+    /// roofs, each tagged with its element ID, at absolute elevations. Catalog placements come from the catalog.
     public func meshes(of document: ModelDocument) throws -> [Mesh] {
-        []
+        var meshes: [Mesh] = []
+        for storey in document.storeys {
+            let base = Double(storey.elevation.ticks)
+            let walls = document.walls.filter { $0.storeyID == storey.id }
+            let footprints = try WallFootprints().footprints(for: walls)
+            for wall in walls {
+                guard let footprint = footprints[wall.id] else { continue }
+                let openings = document.openings.filter { $0.wallID == wall.id }
+                meshes += try ElementMeshes.wall(wall, footprint: footprint, openings: openings, base: base)
+            }
+            meshes += document.slabs.filter { $0.storeyID == storey.id }.compactMap { ElementMeshes.slab($0, base: base) }
+            meshes += document.columns.filter { $0.storeyID == storey.id }.compactMap { ElementMeshes.column($0, base: base) }
+            meshes += document.beams.filter { $0.storeyID == storey.id }.compactMap { ElementMeshes.beam($0, base: base) }
+            meshes += document.stairs.filter { $0.storeyID == storey.id }.compactMap { ElementMeshes.stair($0, base: base) }
+            meshes += document.roofs.filter { $0.storeyID == storey.id }.flatMap { ElementMeshes.roof($0, base: base) }
+        }
+        return meshes
     }
 
     public func section(of document: ModelDocument, along line: SectionLine) throws -> [ClassifiedOutline] {
