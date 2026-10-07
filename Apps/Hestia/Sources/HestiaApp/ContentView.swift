@@ -65,6 +65,8 @@ struct ContentView: View {
             }
             HStack {
                 Button("New") { newModel() }
+                Button("Open…") { openModel() }
+                Button("Save…") { saveModel(model) }
                 toolButton("Wall", .wall)
                 toolButton("Door", .door)
                 toolButton("Delete", .delete)
@@ -170,6 +172,37 @@ struct ContentView: View {
             session = EditSession(model: try HestiaModel.blank())
             tool = .wall
             status = "New model. " + Tool.wall.hint
+        } catch {
+            status = error.localizedDescription
+        }
+    }
+
+    /// Replaces the model with one read from a saved file. Nothing before it can be undone.
+    private func openModel() {
+        let panel = NSOpenPanel()
+        panel.allowedFileTypes = ["json"]
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        pendingStart = nil
+        do {
+            session = EditSession(model: try HestiaModel.open(Data(contentsOf: url)))
+            status = "Opened \(url.lastPathComponent)."
+        } catch {
+            status = error.localizedDescription
+        }
+    }
+
+    /// Writes the model's JSON where the person chooses. The undo history is not saved.
+    private func saveModel(_ model: HestiaModel) {
+        let panel = NSSavePanel()
+        panel.allowedFileTypes = ["json"]
+        panel.nameFieldStringValue = fileName(model, ".json")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try model.saveData().write(to: url, options: .atomic)
+            status = "Saved \(url.lastPathComponent)."
         } catch {
             status = error.localizedDescription
         }
