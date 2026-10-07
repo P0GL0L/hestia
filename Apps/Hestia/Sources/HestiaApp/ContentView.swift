@@ -9,11 +9,14 @@ struct ContentView: View {
         case wall
         /// One click on a drawn wall.
         case door
+        /// One click on a drawn door or wall.
+        case delete
 
         var hint: String {
             switch self {
             case .wall: return "Click two points on the plan to add a wall."
             case .door: return "Click a wall to add a door."
+            case .delete: return "Click a door or a wall to remove it."
             }
         }
     }
@@ -62,6 +65,7 @@ struct ContentView: View {
             HStack {
                 toolButton("Wall", .wall)
                 toolButton("Door", .door)
+                toolButton("Delete", .delete)
                 Button("Undo") { undo() }
                     .keyboardShortcut("z", modifiers: .command)
                     .disabled(!(session?.canUndo ?? false))
@@ -98,12 +102,17 @@ struct ContentView: View {
         status = choice.hint
     }
 
-    /// With the Door tool, or an Option-click, a click on a wall adds a door. With the Wall tool the first
-    /// click starts a wall; the second ends it and adds it to the ground storey.
+    /// With the Door tool, or an Option-click, a click on a wall adds a door. With the Delete tool a click
+    /// removes the door or wall under it. With the Wall tool the first click starts a wall; the second ends it
+    /// and adds it to the ground storey.
     private func click(_ paper: Point2) {
         guard var current = session else { return }
         if tool == .door || NSEvent.modifierFlags.contains(.option) {
             addDoor(paper)
+            return
+        }
+        if tool == .delete {
+            delete(paper)
             return
         }
         guard let start = pendingStart else {
@@ -130,6 +139,21 @@ struct ContentView: View {
                 status = "Added a door. Undo removes it."
             } else {
                 status = "That missed every wall. " + Tool.door.hint
+            }
+        } catch {
+            status = error.localizedDescription
+        }
+    }
+
+    private func delete(_ paper: Point2) {
+        guard var current = session else { return }
+        pendingStart = nil
+        do {
+            if try current.delete(atPaper: paper) {
+                session = current
+                status = "Removed. Undo puts it back."
+            } else {
+                status = "That missed every door and wall. " + Tool.delete.hint
             }
         } catch {
             status = error.localizedDescription
