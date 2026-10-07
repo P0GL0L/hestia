@@ -168,8 +168,9 @@ struct HestiaModel {
     /// A single door in a wall, centered on a model point projected onto the wall's centerline, with a new ID.
     /// Its width, height, and sill come from a door already on that storey, or, with none to copy, the cottage's
     /// single door: 3'-0" by 6'-8" on the floor. It hinges at the start-side jamb
-    /// and swings to whichever side of the wall its open leaf lands on the floor. The offset is rounded to a
-    /// whole inch, or 10 mm on a metric project.
+    /// and swings to whichever side of the wall its open leaf lands on the floor. A storey with no floor to
+    /// test against (no slab, and walls that enclose no area, as with a first lone wall) swings it left. The
+    /// offset is rounded to a whole inch, or 10 mm on a metric project.
     func doorCommand(on wallID: WallID, at point: Point2, id: OpeningID = OpeningID(UUID())) throws -> AddOpeningCommand {
         guard let wall = document.walls.first(where: { $0.id == wallID }) else {
             throw LoadError(message: "That wall is not in the model.")
@@ -201,6 +202,8 @@ struct HestiaModel {
             side = .left
         } else if onFloor(tip(-1), storey: wall.storeyID) {
             side = .right
+        } else if !hasFloor(storey: wall.storeyID) {
+            side = .left
         } else {
             throw LoadError(message: "Neither side of that wall is inside the building.")
         }
@@ -290,10 +293,24 @@ struct HestiaModel {
         if !slabs.isEmpty {
             return slabs.contains { Self.contains($0.outline, point) }
         }
-        let ends = document.walls.filter { $0.storeyID == storey }.flatMap { [$0.start, $0.end] }
-        guard let x0 = ends.map(\.x.ticks).min(), let x1 = ends.map(\.x.ticks).max(),
-              let y0 = ends.map(\.y.ticks).min(), let y1 = ends.map(\.y.ticks).max() else { return false }
-        return point.x.ticks > x0 && point.x.ticks < x1 && point.y.ticks > y0 && point.y.ticks < y1
+        guard let box = wallBox(storey: storey) else { return false }
+        return point.x.ticks > box.x0 && point.x.ticks < box.x1 && point.y.ticks > box.y0 && point.y.ticks < box.y1
+    }
+
+    /// Whether the storey has a floor to test a swing against: a slab, or walls whose box has an area.
+    func hasFloor(storey: StoreyID) -> Bool {
+        if document.slabs.contains(where: { $0.storeyID == storey }) { return true }
+        guard let box = wallBox(storey: storey) else { return false }
+        return box.x1 > box.x0 && box.y1 > box.y0
+    }
+
+    /// The box around the ends of the storey's walls, or nil with no walls.
+    private func wallBox(storey: StoreyID) -> (x0: Int64, x1: Int64, y0: Int64, y1: Int64)? {
+        let ends: [Point2] = document.walls.filter { $0.storeyID == storey }.flatMap { [$0.start, $0.end] }
+        let xs: [Int64] = ends.map(\.x.ticks)
+        let ys: [Int64] = ends.map(\.y.ticks)
+        guard let x0 = xs.min(), let x1 = xs.max(), let y0 = ys.min(), let y1 = ys.max() else { return nil }
+        return (x0, x1, y0, y1)
     }
 
     /// Whether a point lies inside a polygon, by ray casting.
