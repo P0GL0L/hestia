@@ -22,6 +22,10 @@ enum LHouse {
     static let footprint = [mm(0, 0), mm(10000, 0), mm(10000, 6000), mm(5000, 6000), mm(5000, 10000), mm(0, 10000)]
 
     /// The footprint moved out 150 mm to the outer face of the 300 mm exterior walls, so slab edges reach it.
+    /// The building section: north through the hall stair at x = 1200 mm, from 1.5 m south of the house to 1.5 m
+    /// north of it, looking west, so both storeys, both slabs, the stair, and the roof are cut.
+    static let crossSection = SectionLine(start: mm(1200, -1500), end: mm(1200, 11500))
+
     static let slabOutline = [mm(-150, -150), mm(10150, -150), mm(10150, 6150), mm(5150, 6150), mm(5150, 10150),
                               mm(-150, 10150)]
 
@@ -114,10 +118,20 @@ enum LHouse {
             AddRoofCommand(roofID: RoofID(id(901)), storeyID: upper, footprint: footprint,
                            eaveHeight: .millimeters(2700), pitchRisePer12: .inches(6),
                            overhang: .millimeters(450)).erased,
+            AddSheetCommand(sheetID: SheetID(id(908)), number: "A-000", title: "Cover", paper: .archD, scale: nil,
+                            views: [.cover]).erased,
             AddSheetCommand(sheetID: SheetID(id(902)), number: "A-101", title: "Ground Floor Plan", paper: .archD,
                             scale: .quarterInch, views: [.floorPlan(storeyID: ground)]).erased,
             AddSheetCommand(sheetID: SheetID(id(903)), number: "A-102", title: "Upper Floor Plan", paper: .archD,
                             scale: .quarterInch, views: [.floorPlan(storeyID: upper)]).erased,
+            // Four elevations stacked on one sheet, each at the largest scale that fits.
+            AddSheetCommand(sheetID: SheetID(id(909)), number: "A-201", title: "Elevations", paper: .archD, scale: nil,
+                            views: [.elevation(direction: .south), .elevation(direction: .north),
+                                    .elevation(direction: .east), .elevation(direction: .west)]).erased,
+            AddSheetCommand(sheetID: SheetID(id(910)), number: "A-301", title: "Building Section", paper: .archD,
+                            scale: .quarterInch, views: [.section(line: crossSection)]).erased,
+            AddSheetCommand(sheetID: SheetID(id(911)), number: "A-401", title: "Roof Plan", paper: .archD,
+                            scale: .quarterInch, views: [.roofPlan]).erased,
         ]
         return list
     }
@@ -153,6 +167,13 @@ enum LHouse {
     #expect(house.rooms.count == 6)
     #expect(house.roofs.first?.planes.allSatisfy { $0.pitchRisePer12 == .inches(6) } == true)
     #expect(house.project.displayUnits == .metric)
+    let numbers: [String] = house.sheets.map(\.number)
+    #expect(numbers == ["A-000", "A-101", "A-102", "A-201", "A-301", "A-401"])
+    let sections = house.sheets.flatMap(\.views).filter { view in
+        if case .section = view { return true }
+        return false
+    }
+    #expect(sections.count == 1)
 }
 
 @Test func lHouseRoomsConnectThroughInteriorDoors() throws {
