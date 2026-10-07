@@ -84,6 +84,11 @@ struct HestiaModel {
     static let defaultWallThickness: Length = .inches(6)
     static let defaultWallHeight: Length = .feet(8)
 
+    /// A door's size when the storey has none to copy: the cottage's single door.
+    static let defaultDoorWidth: Length = .feet(3)
+    static let defaultDoorHeight: Length = .feet(6, inchCount: 8)
+    static let defaultDoorSill: Length = .feet(0)
+
     /// The cottage fixture, from the app bundle or, when run from the repository, its fixtures folder.
     static func cottage() throws -> HestiaModel {
         guard let url = fixtureURL(named: "rect-cottage") else {
@@ -145,7 +150,8 @@ struct HestiaModel {
     }
 
     /// A single door in a wall, centered on a model point projected onto the wall's centerline, with a new ID.
-    /// Its width, height, and sill come from a door already on that storey; it hinges at the start-side jamb
+    /// Its width, height, and sill come from a door already on that storey, or, with none to copy, the cottage's
+    /// single door: 3'-0" by 6'-8" on the floor. It hinges at the start-side jamb
     /// and swings to whichever side of the wall its open leaf lands on the floor. The offset is rounded to a
     /// whole inch, or 10 mm on a metric project.
     func doorCommand(on wallID: WallID, at point: Point2, id: OpeningID = OpeningID(UUID())) throws -> AddOpeningCommand {
@@ -153,13 +159,14 @@ struct HestiaModel {
             throw LoadError(message: "That wall is not in the model.")
         }
         let storeyWalls = Set(document.walls.filter { $0.storeyID == wall.storeyID }.map(\.id))
-        guard let model = document.openings.first(where: { $0.kind.isDoor && storeyWalls.contains($0.wallID) }) else {
-            throw LoadError(message: "There is no door on this storey to copy a size from.")
-        }
+        let copied = document.openings.first { $0.kind.isDoor && storeyWalls.contains($0.wallID) }
+        let doorWidth: Length = copied?.width ?? Self.defaultDoorWidth
+        let doorHeight: Length = copied?.height ?? Self.defaultDoorHeight
+        let doorSill: Length = copied?.sillHeight ?? Self.defaultDoorSill
         let sx = Double(wall.start.x.ticks), sy = Double(wall.start.y.ticks)
         let dx = Double(wall.end.x.ticks) - sx, dy = Double(wall.end.y.ticks) - sy
         let length: Double = (dx * dx + dy * dy).squareRoot()
-        let width = Double(model.width.ticks)
+        let width = Double(doorWidth.ticks)
         guard length > width else { throw LoadError(message: "That wall is shorter than a door.") }
         let (ux, uy) = (dx / length, dy / length)
         let along: Double = (Double(point.x.ticks) - sx) * ux + (Double(point.y.ticks) - sy) * uy
@@ -182,7 +189,7 @@ struct HestiaModel {
             throw LoadError(message: "Neither side of that wall is inside the building.")
         }
         return AddOpeningCommand(openingID: id, wallID: wallID, offsetAlongWall: Length(ticks: Int64(offset)),
-                                 width: model.width, height: model.height, sillHeight: model.sillHeight,
+                                 width: doorWidth, height: doorHeight, sillHeight: doorSill,
                                  kind: .singleDoor, swing: DoorSwing(hinge: .nearStart, opensToward: side))
     }
 
