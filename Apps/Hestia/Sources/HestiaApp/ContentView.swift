@@ -56,13 +56,15 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
             HStack(spacing: 12) {
-                PlanCanvas(items: model.plan, pendingStart: pendingStart) { paper in click(paper) }
+                PlanCanvas(items: model.plan, bounds: model.planBounds, pendingStart: pendingStart,
+                           onClick: { paper in click(paper) })
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.white)
                 OrbitScene(meshes: model.meshes)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             HStack {
+                Button("New") { newModel() }
                 toolButton("Wall", .wall)
                 toolButton("Door", .door)
                 toolButton("Delete", .delete)
@@ -155,6 +157,19 @@ struct ContentView: View {
             } else {
                 status = "That missed every door and wall. " + Tool.delete.hint
             }
+        } catch {
+            status = error.localizedDescription
+        }
+    }
+
+    /// Replaces the model with an empty one: one building, one ground storey, no walls. Nothing before it can
+    /// be undone.
+    private func newModel() {
+        pendingStart = nil
+        do {
+            session = EditSession(model: try HestiaModel.blank())
+            tool = .wall
+            status = "New model. " + Tool.wall.hint
         } catch {
             status = error.localizedDescription
         }

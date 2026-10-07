@@ -17,8 +17,11 @@ struct HestiaModel {
     let groundStorey: StoreyID?
     /// The ground floor plan's walls, openings, stairs, and room tags, in sheet paper space.
     let plan: [DisplayItem]
-    /// How that plan was placed on its sheet, to take paper points back into the model.
+    /// How that plan was placed on its sheet, to take paper points back into the model. A ground storey with no
+    /// walls has no drawn plan to place, so it gets the blank placement instead, and the first wall can be drawn.
     let planTransform: ViewTransform?
+    /// The paper the plan view shows: the drawn plan's extent, or the blank area when the storey has no walls.
+    let planBounds: (min: Point2, max: Point2)?
 
     /// Layers of a floor plan sheet that make up the plan itself, without dimensions or the sheet frame.
     static let planLayers: Set<String> = [
@@ -34,14 +37,52 @@ struct HestiaModel {
         meshes = try engine.meshes(of: document)
         let ground = document.storeys.min { $0.elevation.ticks < $1.elevation.ticks }
         groundStorey = ground?.id
-        planTransform = ground.flatMap { drawingSet.planTransform(for: document, storey: $0.id) }
+        let placed = ground.flatMap { drawingSet.planTransform(for: document, storey: $0.id) }
+        let empty = ground.map { storey in !document.walls.contains { $0.storeyID == storey.id } } ?? false
+        planTransform = placed ?? (empty ? Self.blankTransform : nil)
         // The ground plan's sheet: the model's own sheet for it, or the drawing set's default first plan sheet.
         let number = ground.flatMap { storey in
             document.sheets.first { $0.views.contains(.floorPlan(storeyID: storey.id)) }?.number
         } ?? "A-101"
         let planSheet = sheets.first { $0.number == number }
         plan = planSheet?.content.items.filter { Self.planLayers.contains($0.style.layer) } ?? []
+        if let drawn = DisplayList(items: plan).bounds {
+            planBounds = drawn
+        } else if placed == nil && empty {
+            planBounds = Self.blankArea
+        } else {
+            planBounds = nil
+        }
     }
+
+    /// A new model: one building with one ground storey at elevation zero, no walls, and no display units, so
+    /// lengths read in feet and inches.
+    static func blank() throws -> HestiaModel {
+        var document = ModelDocument(schemaVersion: 1, project: Project(id: ProjectID(UUID()), name: "Untitled"),
+                                     buildings: [], storeys: [], walls: [], openings: [], rooms: [])
+        let building = BuildingID(UUID())
+        let commands: [AnyCommand] = [
+            AddBuildingCommand(buildingID: building, name: "Building").erased,
+            AddStoreyCommand(storeyID: StoreyID(UUID()), buildingID: building, name: "Ground Floor",
+                             elevation: .millimeters(0)).erased,
+        ]
+        _ = try document.perform(batch: commands)
+        return try HestiaModel(document: document)
+    }
+
+    /// Where an empty ground storey is drawn on: model zero at paper zero, at 1/4" = 1'-0".
+    static let blankTransform = ViewTransform(scale: .quarterInch, modelOrigin: Point2(x: .feet(0), y: .feet(0)),
+                                              paperOrigin: Point2(x: .feet(0), y: .feet(0)))
+
+    /// The paper an empty plan shows: 60' by 40' of the model through the blank placement, from model zero.
+    static let blankArea: (min: Point2, max: Point2) = (
+        min: blankTransform.paper(Point2(x: .feet(0), y: .feet(0))),
+        max: blankTransform.paper(Point2(x: .feet(60), y: .feet(40)))
+    )
+
+    /// An exterior wall's size when the storey has none to copy: the cottage's, 6" thick and 8'-0" high.
+    static let defaultWallThickness: Length = .inches(6)
+    static let defaultWallHeight: Length = .feet(8)
 
     /// The cottage fixture, from the app bundle or, when run from the repository, its fixtures folder.
     static func cottage() throws -> HestiaModel {
@@ -69,16 +110,15 @@ struct HestiaModel {
     }
 
     /// A straight wall on the ground storey from one model point to another, with a new ID, as thick and as
-    /// tall as an exterior wall on that storey (one with layers, else the thickest).
+    /// tall as an exterior wall on that storey (one with layers, else the thickest). On a storey with no walls
+    /// it takes the default exterior size.
     func wallCommand(from start: Point2, to end: Point2, id: WallID = WallID(UUID())) throws -> AddWallCommand {
         guard let storey = groundStorey else { throw LoadError(message: "The model has no storey to draw on.") }
         let walls = document.walls.filter { $0.storeyID == storey }
         let exterior = walls.first { !$0.layers.isEmpty } ?? walls.max { $0.thickness.ticks < $1.thickness.ticks }
-        guard let template = exterior else {
-            throw LoadError(message: "The ground storey has no wall to take a thickness and height from.")
-        }
-        return AddWallCommand(wallID: id, storeyID: storey, start: start, end: end, thickness: template.thickness,
-                              height: template.height)
+        return AddWallCommand(wallID: id, storeyID: storey, start: start, end: end,
+                              thickness: exterior?.thickness ?? Self.defaultWallThickness,
+                              height: exterior?.height ?? Self.defaultWallHeight)
     }
 
     /// What a point of the plan sheet's paper lands on: the drawn wall outlines that contain it.
@@ -258,6 +298,9 @@ struct HestiaModel {
     func dxf() throws -> Data {
         guard groundStorey != nil, planTransform != nil else {
             throw LoadError(message: "The model has no placed ground floor plan to export.")
+        }
+        guard !plan.isEmpty else {
+            throw LoadError(message: "The ground floor has nothing drawn to export. Add a wall first.")
         }
         let units: DXFDrawingUnits = document.project.displayUnits == .metric ? .millimeters : .inches
         let text = try DisplayListDXF.export(DisplayList(items: modelPlan()), units: units)
