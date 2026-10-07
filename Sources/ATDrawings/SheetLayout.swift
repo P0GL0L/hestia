@@ -2,18 +2,33 @@ import ATContracts
 import Foundation
 
 /// Maps model-space plan or elevation points onto a sheet at a drawing scale.
-struct ViewTransform: Sendable {
-    var scale: DrawingScale
+public struct ViewTransform: Hashable, Sendable {
+    public var scale: DrawingScale
     /// Model point that lands on `paperOrigin`.
-    var modelOrigin: Point2
-    var paperOrigin: Point2
+    public var modelOrigin: Point2
+    public var paperOrigin: Point2
 
-    func paper(_ point: Point2) -> Point2 {
+    public init(scale: DrawingScale, modelOrigin: Point2, paperOrigin: Point2) {
+        self.scale = scale
+        self.modelOrigin = modelOrigin
+        self.paperOrigin = paperOrigin
+    }
+
+    public func paper(_ point: Point2) -> Point2 {
         Point2(x: Length(ticks: paperOrigin.x.ticks + scale.paper(Length(ticks: point.x.ticks - modelOrigin.x.ticks)).ticks),
                y: Length(ticks: paperOrigin.y.ticks + scale.paper(Length(ticks: point.y.ticks - modelOrigin.y.ticks)).ticks))
     }
 
-    func paper(_ length: Length) -> Length { scale.paper(length) }
+    public func paper(_ length: Length) -> Length { scale.paper(length) }
+
+    /// The model point a paper point stands for, the inverse of `paper`. A paper point comes back as the same
+    /// paper point. A model point comes back unchanged only when it sits on the scale's grid, since `paper`
+    /// rounds to the nearest paper tick.
+    public func model(_ point: Point2) -> Point2 {
+        let n = scale.modelUnitsPerPaperUnit
+        return Point2(x: Length(ticks: modelOrigin.x.ticks + (point.x.ticks - paperOrigin.x.ticks) * n),
+                      y: Length(ticks: modelOrigin.y.ticks + (point.y.ticks - paperOrigin.y.ticks) * n))
+    }
 
     /// Centers a model box of `size` in `area`, and reports whether it fits.
     static func centering(
