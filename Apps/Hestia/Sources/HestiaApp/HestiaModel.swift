@@ -294,6 +294,22 @@ struct HestiaModel {
         return inside
     }
 
+    /// The model document as saved: its JSON, nothing more. The undo history is not part of it.
+    func saveData() throws -> Data {
+        try document.encodeToJSONData()
+    }
+
+    /// A model opened from saved JSON, drawn afresh through the geometry engine.
+    static func open(_ data: Data) throws -> HestiaModel {
+        let document: ModelDocument
+        do {
+            document = try ModelDocument.decode(from: data)
+        } catch {
+            throw LoadError(message: "That file is not a Hestia model: \(error.localizedDescription)")
+        }
+        return try HestiaModel(document: document)
+    }
+
     /// The whole schematic set as one PDF, a page per sheet, at true scale.
     func pdf() throws -> Data {
         try SheetPDFExporter().export(.sheets(sheets))
