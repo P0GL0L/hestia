@@ -67,10 +67,14 @@ public struct SchematicDrawingSet: DrawingGenerator {
             let placed = ViewTransform.centering(modelMin: extent.min, modelMax: extent.max, in: inner, scale: scale)
             let outlines = try geometry.planView(of: document, storey: storeyID)
             let areas = try geometry.roomAreas(of: document, storey: storeyID)
+            var stairsBelow: [ClassifiedOutline] = []
+            if let below = Self.storey(below: storeyID, in: document) {
+                stairsBelow = try geometry.planView(of: document, storey: below.id).filter { $0.kind == .stair }
+            }
             let under = paperPoint(placed.transform.paperOrigin.x.ticks - reserve,
                                    placed.transform.paperOrigin.y.ticks - reserve - mmTicks(8))
             return FloorPlanView.items(document: document, storey: storeyID, outlines: outlines, areas: areas,
-                                       view: placed.transform)
+                                       view: placed.transform, stairsBelow: stairsBelow)
                 + DimensionChains.items(document: document, storey: storeyID, view: placed.transform)
                 + DimensionChains.interiorItems(document: document, storey: storeyID, view: placed.transform)
                 + SheetFrame.viewTitle("\(storeyName) Plan", scale: scale, at: placed.fits ? under : titleAt)
@@ -149,6 +153,15 @@ public struct SchematicDrawingSet: DrawingGenerator {
                                                                  slot.maxY - mmTicks(8)))
                 + SheetFrame.viewTitle("\(storeyName) Electrical Plan", scale: scale, at: placed.fits ? under : titleAt)
         }
+    }
+
+    /// The next storey down in the same building, or nil for the lowest.
+    static func storey(below id: StoreyID, in document: ModelDocument) -> Storey? {
+        guard let storey = document.storeys.first(where: { $0.id == id }) else { return nil }
+        let lower = document.storeys.filter {
+            $0.buildingID == storey.buildingID && $0.elevation.ticks < storey.elevation.ticks
+        }
+        return lower.max { $0.elevation.ticks < $1.elevation.ticks }
     }
 
     /// The project's display units, else imperial when any sheet uses an inch scale, metric otherwise.
