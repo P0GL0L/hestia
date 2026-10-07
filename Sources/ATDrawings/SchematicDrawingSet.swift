@@ -4,7 +4,9 @@ import Foundation
 /// Builds the schematic drawing set: one paper-space sheet per `Sheet` in the model, each with the border,
 /// title block, and boxed SCHEMATIC / NOT FOR CONSTRUCTION stamp. Output is not a permit set.
 ///
-/// When the model has no sheets, it draws one floor plan sheet per storey on ARCH D at 1/4" = 1'-0".
+/// When the model has no sheets, it draws one floor plan sheet per storey on ARCH D at 1/4" = 1'-0"; once
+/// there are walls, an elevations sheet with all four elevations, each at the largest scale that fits; and once
+/// there is a roof, a roof plan at 1/4" = 1'-0". These sheets exist only in the drawn set, never in the model.
 public struct SchematicDrawingSet: DrawingGenerator {
     /// Printed in the title block's date field, such as `2026-10-06`. Nil prints a dash.
     public var issueDate: String?
@@ -19,11 +21,32 @@ public struct SchematicDrawingSet: DrawingGenerator {
 
     func sheetsToDraw(_ document: ModelDocument) -> [Sheet] {
         if !document.sheets.isEmpty { return document.sheets }
-        return document.storeys.enumerated().map { index, storey in
+        var sheets: [Sheet] = document.storeys.enumerated().map { index, storey in
             Sheet(id: SheetID(storey.id.rawValue), number: String(format: "A-%d", 101 + index),
                   title: "\(storey.name) Plan", paper: .archD, scale: .quarterInch,
                   views: [.floorPlan(storeyID: storey.id)])
         }
+        if !document.walls.isEmpty {
+            let views: [SheetView] = [
+                .elevation(direction: .south), .elevation(direction: .north),
+                .elevation(direction: .east), .elevation(direction: .west),
+            ]
+            sheets.append(Sheet(id: Self.defaultSheetID(document, tag: 0x21), number: "A-201", title: "Elevations",
+                                paper: .archD, scale: nil, views: views))
+        }
+        if !document.roofs.isEmpty {
+            sheets.append(Sheet(id: Self.defaultSheetID(document, tag: 0x41), number: "A-401", title: "Roof Plan",
+                                paper: .archD, scale: .quarterInch, views: [.roofPlan]))
+        }
+        return sheets
+    }
+
+    /// A stable ID for a sheet the set adds on its own: the project's ID with its last byte changed by `tag`.
+    static func defaultSheetID(_ document: ModelDocument, tag: UInt8) -> SheetID {
+        var bytes = document.project.id.rawValue.uuid
+        bytes.15 ^= tag
+        bytes.14 ^= 0xA5
+        return SheetID(UUID(uuid: bytes))
     }
 
     func draw(_ sheet: Sheet, document: ModelDocument, geometry: any GeometryEngine) throws -> SheetDrawing {
