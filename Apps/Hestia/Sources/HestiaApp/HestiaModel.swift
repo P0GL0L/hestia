@@ -252,17 +252,55 @@ struct HestiaModel {
         try SheetPDFExporter().export(.sheets(sheets))
     }
 
-    /// The ground floor's joined wall outlines as ASCII DXF, with the schematic stamp, in the project's units.
+    /// The ground floor plan as ASCII DXF, with the schematic stamp, in the project's units: the plan's walls,
+    /// doors and swings, windows, stairs, and room tags, taken back from the sheet into the model so a length in
+    /// the file is the length in the model. Hatches have no DXF entity here and are left out by the writer.
     func dxf() throws -> Data {
-        guard let storey = groundStorey else {
-            throw LoadError(message: "The model has no storey to export.")
+        guard groundStorey != nil, planTransform != nil else {
+            throw LoadError(message: "The model has no placed ground floor plan to export.")
         }
-        let walls = document.walls.filter { $0.storeyID == storey }
-        let footprints = try WallFootprints().footprints(for: walls)
-        let outlines = footprints.mapValues { ClosedPolygon2(vertices: $0) }
         let units: DXFDrawingUnits = document.project.displayUnits == .metric ? .millimeters : .inches
-        let text = try SchematicWallOutlineDXF.export(outlines: outlines, walls: walls, units: units)
+        let text = try DisplayListDXF.export(DisplayList(items: modelPlan()), units: units)
         return Data(text.utf8)
+    }
+
+    /// The ground floor plan in model space: each plan item taken back through the plan's placement on its
+    /// sheet. Paper points come back exactly onto the scale's model grid, a fraction of a millimetre at most
+    /// from where the model put them. Text heights are scaled with the drawing too, so a room tag in the file
+    /// reads at its printed size when the file is plotted at the plan's scale. Without a placement there is no
+    /// plan to take back, and the result is empty.
+    func modelPlan() -> [DisplayItem] {
+        guard let transform = planTransform else { return [] }
+        return plan.map { Self.model($0, through: transform) }
+    }
+
+    /// One paper-space item in model space. The placement is a uniform scale and a shift with y up on both
+    /// sides, so every item inverts: angles are kept and lengths grow by the scale's ratio.
+    static func model(_ item: DisplayItem, through transform: ViewTransform) -> DisplayItem {
+        let ratio: Int64 = transform.scale.modelUnitsPerPaperUnit
+        func grow(_ length: Length) -> Length { Length(ticks: length.ticks * ratio) }
+        let primitive: DisplayPrimitive
+        switch item.primitive {
+        case let .line(start, end):
+            primitive = .line(start: transform.model(start), end: transform.model(end))
+        case let .polyline(points, closed):
+            primitive = .polyline(points: points.map { transform.model($0) }, closed: closed)
+        case let .arc(center, radius, start, sweep):
+            primitive = .arc(center: transform.model(center), radius: grow(radius), start: start, sweep: sweep)
+        case let .text(position, string, height, rotation, alignment):
+            primitive = .text(position: transform.model(position), string: string, height: grow(height),
+                              rotation: rotation, alignment: alignment)
+        case let .hatch(boundary, pattern, spacing, angle):
+            primitive = .hatch(boundary: boundary.map { transform.model($0) }, pattern: pattern,
+                               spacing: grow(spacing), angle: angle)
+        case let .dimension(from, to, offset, override):
+            primitive = .dimension(from: transform.model(from), to: transform.model(to), offset: grow(offset),
+                                   override: override)
+        case let .symbol(name, position, rotation, size):
+            primitive = .symbol(name: name, position: transform.model(position), rotation: rotation,
+                                size: grow(size))
+        }
+        return DisplayItem(primitive, style: item.style, elementID: item.elementID)
     }
 
     static func today() -> String {
