@@ -1,4 +1,5 @@
 import ATContracts
+import AppKit
 import SwiftUI
 
 struct ContentView: View {
@@ -6,7 +7,7 @@ struct ContentView: View {
     @State private var loadError: String?
     /// The first click of a wall, on the plan sheet's paper, until the second click places its end.
     @State private var pendingStart: Point2?
-    @State private var status = "Click two points on the plan to add a wall."
+    @State private var status = "Click two points on the plan to add a wall. Option-click a wall to add a door."
     @State private var exportMessage = "Schematic exports land in ~/Hestia-exports"
 
     init() {
@@ -61,9 +62,14 @@ struct ContentView: View {
         .frame(minWidth: 1100, minHeight: 720)
     }
 
-    /// The first click starts a wall; the second ends it and adds it to the ground storey.
+    /// An Option-click on a wall adds a door. Otherwise the first click starts a wall; the second ends it and
+    /// adds it to the ground storey.
     private func click(_ paper: Point2) {
         guard var current = session else { return }
+        if NSEvent.modifierFlags.contains(.option) {
+            addDoor(paper)
+            return
+        }
         guard let start = pendingStart else {
             pendingStart = paper
             status = "Click the wall's end point."
@@ -74,6 +80,21 @@ struct ContentView: View {
             try current.addWall(fromPaper: start, toPaper: paper)
             session = current
             status = "Added a wall. Undo removes it."
+        } catch {
+            status = error.localizedDescription
+        }
+    }
+
+    private func addDoor(_ paper: Point2) {
+        guard var current = session else { return }
+        pendingStart = nil
+        do {
+            if try current.addDoor(atPaper: paper) {
+                session = current
+                status = "Added a door. Undo removes it."
+            } else {
+                status = "Option-click on a wall to add a door there."
+            }
         } catch {
             status = error.localizedDescription
         }
