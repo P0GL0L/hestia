@@ -1,7 +1,7 @@
 import ATContracts
 import Foundation
 
-/// Schematic floor plan: cut walls with hatching, door swings, window symbols, and room tags with area.
+/// Schematic floor plan: cut walls with hatching, door swings, window symbols, stairs, and room tags with area.
 enum FloorPlanView {
     static let wallStyle = DisplayStyle(layer: "A-WALL", pen: .heavy)
     static let beyondStyle = DisplayStyle(layer: "A-WALL", pen: .thin)
@@ -9,6 +9,8 @@ enum FloorPlanView {
     static let doorStyle = DisplayStyle(layer: "A-DOOR", pen: .thin)
     static let glazingStyle = DisplayStyle(layer: "A-GLAZ", pen: .thin)
     static let roomStyle = DisplayStyle(layer: "A-AREA-IDEN", pen: .fine)
+    static let stairStyle = DisplayStyle(layer: "A-FLOR-STRS", pen: .thin)
+    static let floorOpeningStyle = DisplayStyle(layer: "A-FLOR-OPNG", pen: .thin, pattern: .dashed)
 
     /// Model-space extent of a storey's walls, or nil when it has none.
     static func extent(of document: ModelDocument, storey: StoreyID) -> (min: Point2, max: Point2)? {
@@ -22,7 +24,7 @@ enum FloorPlanView {
 
     static func items(
         document: ModelDocument, storey: StoreyID, outlines: [ClassifiedOutline], areas: [RoomID: Area],
-        view: ViewTransform
+        view: ViewTransform, stairsBelow: [ClassifiedOutline] = []
     ) -> [DisplayItem] {
         var items: [DisplayItem] = []
         let hatchSpacing = Length.millimeters(1)
@@ -35,6 +37,14 @@ enum FloorPlanView {
             items.append(DisplayItem(.polyline(points: polygon, closed: true),
                                      style: outline.classification == .cut ? wallStyle : beyondStyle,
                                      elementID: outline.elementID))
+        }
+        for outline in outlines where outline.kind == .stair {
+            items += StairPlan.items(outline, document: document, view: view)
+        }
+        // A stair from the storey below arrives through an opening in this floor.
+        for outline in stairsBelow where outline.kind == .stair {
+            items.append(DisplayItem(.polyline(points: outline.polygon.map(view.paper), closed: true),
+                                     style: floorOpeningStyle, elementID: outline.elementID))
         }
         let walls = Dictionary(uniqueKeysWithValues: document.walls.map { ($0.id, $0) })
         let marks = ScheduleView.marks(document)
