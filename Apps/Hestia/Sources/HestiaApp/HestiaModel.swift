@@ -165,6 +165,18 @@ struct HestiaModel {
         }
     }
 
+    /// A room on the ground storey with a new ID, the given name and boundary walls, and no finishes.
+    func roomCommand(named name: String, walls: [WallID], id: RoomID = RoomID(UUID())) throws -> AddRoomCommand {
+        guard let storey = groundStorey else { throw LoadError(message: "The model has no storey to put a room on.") }
+        return AddRoomCommand(roomID: id, storeyID: storey, name: name, boundaryWallIDs: walls)
+    }
+
+    /// An error as a status line: its own description when it has one, else the refusal it names.
+    static func describe(_ error: Error) -> String {
+        if let described = (error as? LocalizedError)?.errorDescription { return described }
+        return "Refused: \(error)"
+    }
+
     /// A single door in a wall, centered on a model point projected onto the wall's centerline, with a new ID.
     /// Its width, height, and sill come from a door already on that storey, or, with none to copy, the cottage's
     /// single door: 3'-0" by 6'-8" on the floor. It hinges at the start-side jamb
@@ -457,6 +469,12 @@ struct EditSession {
             try perform(model.doorCommand(on: id, at: point).erased)
             return true
         }
+    }
+
+    /// Adds a room on the ground storey named `name` and bounded by `walls` in the order given, with a new ID
+    /// and no finishes. The command's own checks decide what is refused.
+    mutating func addRoom(named name: String, walls: [WallID]) throws {
+        try perform(model.roomCommand(named: name, walls: walls).erased)
     }
 
     /// Removes what a point of the plan sheet's paper lands on: a door before the wall it sits in, else the

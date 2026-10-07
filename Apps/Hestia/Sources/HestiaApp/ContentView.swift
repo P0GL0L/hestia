@@ -11,12 +11,15 @@ struct ContentView: View {
         case door
         /// One click on a drawn door or wall.
         case delete
+        /// Clicks on drawn walls pick a room's boundary; Add Room makes it.
+        case room
 
         var hint: String {
             switch self {
             case .wall: return "Click two points on the plan to add a wall."
             case .door: return "Click a wall to add a door."
             case .delete: return "Click a door or a wall to remove it."
+            case .room: return "Click walls to add them to the room's boundary or take them out, then Add Room."
             }
         }
     }
@@ -26,6 +29,9 @@ struct ContentView: View {
     @State private var loadError: String?
     /// The first click of a wall, on the plan sheet's paper, until the second click places its end.
     @State private var pendingStart: Point2?
+    /// The Room tool's boundary so far, in click order.
+    @State private var roomWalls: [WallID] = []
+    @State private var roomName = "Room"
     @State private var status = Tool.wall.hint
     @State private var exportMessage = "Schematic exports land in ~/Hestia-exports"
 
@@ -57,7 +63,7 @@ struct ContentView: View {
             }
             HStack(spacing: 12) {
                 PlanCanvas(items: model.plan, bounds: model.planBounds, pendingStart: pendingStart,
-                           onClick: { paper in click(paper) })
+                           selected: Set(roomWalls.map(\.rawValue)), onClick: { paper in click(paper) })
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.white)
                 OrbitScene(meshes: model.meshes, sessionID: sessionID)
@@ -70,6 +76,13 @@ struct ContentView: View {
                 toolButton("Wall", .wall)
                 toolButton("Door", .door)
                 toolButton("Delete", .delete)
+                toolButton("Room", .room)
+                if tool == .room {
+                    TextField("Room name", text: $roomName)
+                        .frame(width: 140)
+                    Button("Add Room") { addRoom() }
+                        .disabled(roomWalls.isEmpty)
+                }
                 Button("Undo") { undo() }
                     .keyboardShortcut("z", modifiers: .command)
                     .disabled(!(session?.canUndo ?? false))
@@ -103,6 +116,7 @@ struct ContentView: View {
     private func select(_ choice: Tool) {
         tool = choice
         pendingStart = nil
+        roomWalls = []
         status = choice.hint
     }
 
@@ -117,6 +131,10 @@ struct ContentView: View {
         }
         if tool == .delete {
             delete(paper)
+            return
+        }
+        if tool == .room {
+            toggleRoomWall(paper)
             return
         }
         guard let start = pendingStart else {
@@ -164,12 +182,45 @@ struct ContentView: View {
         }
     }
 
+    /// Puts the clicked wall in the room's boundary, or takes it out if it is there.
+    private func toggleRoomWall(_ paper: Point2) {
+        guard let model = session?.model else { return }
+        switch model.wallHit(paper: paper) {
+        case .none:
+            status = "That missed every wall. " + Tool.room.hint
+        case .ambiguous:
+            status = "More than one wall is there. Click where only one wall is drawn."
+        case let .wall(id):
+            if let index = roomWalls.firstIndex(of: id) {
+                roomWalls.remove(at: index)
+            } else {
+                roomWalls.append(id)
+            }
+            status = roomWalls.count == 1 ? "1 wall in the boundary." : "\(roomWalls.count) walls in the boundary."
+        }
+    }
+
+    /// Makes the room from the picked walls and the name, as the model's command checks them.
+    private func addRoom() {
+        guard var current = session else { return }
+        do {
+            try current.addRoom(named: roomName, walls: roomWalls)
+            session = current
+            status = "Added \(roomName). Undo removes it."
+            roomWalls = []
+            roomName = "Room"
+        } catch {
+            status = HestiaModel.describe(error)
+        }
+    }
+
     /// Replaces the model with an empty one: one building, one ground storey, no walls. Nothing before it can
     /// be undone.
     private func newModel() {
         pendingStart = nil
         do {
             session = EditSession(model: try HestiaModel.blank())
+            roomWalls = []
             tool = .wall
             status = "New model. " + Tool.wall.hint
         } catch {
@@ -188,6 +239,7 @@ struct ContentView: View {
         pendingStart = nil
         do {
             session = EditSession(model: try HestiaModel.open(Data(contentsOf: url)))
+            roomWalls = []
             status = "Opened \(url.lastPathComponent)."
         } catch {
             status = error.localizedDescription
@@ -214,6 +266,9 @@ struct ContentView: View {
         do {
             try current.undo()
             session = current
+            // An undone wall leaves the room's boundary too.
+            let walls = Set(current.model.document.walls.map(\.id))
+            roomWalls = roomWalls.filter { walls.contains($0) }
             status = "Undone."
         } catch {
             status = error.localizedDescription

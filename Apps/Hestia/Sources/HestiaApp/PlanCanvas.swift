@@ -5,11 +5,12 @@ import SwiftUI
 /// openings, and room tags, fitted to the view. Items are in sheet paper space, and `bounds` is the paper the
 /// view fits: the plan's extent, or the blank area of a storey with no walls, outlined so there is somewhere
 /// to click. A click reports the paper point under it; `pendingStart`, a paper point, is marked while a wall
-/// waits for its end.
+/// waits for its end, and walls whose IDs are in `selected` are outlined in orange.
 struct PlanCanvas: View {
     var items: [DisplayItem]
     var bounds: (min: Point2, max: Point2)?
     var pendingStart: Point2?
+    var selected: Set<UUID> = []
     var onClick: (Point2) -> Void
 
     var body: some View {
@@ -27,6 +28,12 @@ struct PlanCanvas: View {
                 }
                 for item in items {
                     draw(item, in: &context, fit: fit)
+                }
+                for item in items where item.style.layer == "A-WALL" {
+                    guard let id = item.elementID, selected.contains(id),
+                          case let .polyline(points, closed) = item.primitive else { continue }
+                    let outline = polyline(points, closed: closed, fit: fit)
+                    context.stroke(outline, with: .color(.orange), lineWidth: 3)
                 }
                 if let start = pendingStart {
                     let p = fit.point(start)
