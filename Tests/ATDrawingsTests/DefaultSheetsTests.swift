@@ -65,7 +65,7 @@ private func count(_ sheet: SheetDrawing, layerPrefix: String) -> Int {
 @Test func wallsAddAnElevationsSheetWithAllFour() throws {
     let sheets = try draw(model(walls: true, roof: false))
     let numbers: [String] = sheets.map(\.number)
-    #expect(numbers == ["A-101", "A-201"])
+    #expect(numbers == ["A-101", "A-201", "A-301"])
     let elevations = try #require(sheets.first { $0.number == "A-201" })
     #expect(elevations.title == "Elevations")
     #expect(notGenerated(elevations).isEmpty)
@@ -80,12 +80,37 @@ private func count(_ sheet: SheetDrawing, layerPrefix: String) -> Int {
 @Test func aRoofAddsARoofPlan() throws {
     let sheets = try draw(model(walls: true, roof: true))
     let numbers: [String] = sheets.map(\.number)
-    #expect(numbers == ["A-101", "A-201", "A-401"])
+    #expect(numbers == ["A-101", "A-201", "A-301", "A-401"])
     let roofPlan = try #require(sheets.first { $0.number == "A-401" })
     #expect(roofPlan.title == "Roof Plan")
     #expect(notGenerated(roofPlan).isEmpty)
     #expect(count(roofPlan, layerPrefix: "A-ROOF") > 0)
-    // No section is added.
+}
+
+@Test func wallsAddASectionCutSouthToNorthThroughTheMiddle() throws {
+    let document = try model(walls: true, roof: true)
+    // The wall box runs 0' to 20' east and 0' to 15' north.
+    let line = try #require(SchematicDrawingSet.defaultSectionLine(document))
+    #expect(line == SectionLine(start: pt(10, -1), end: pt(10, 16)))
+    let sheets = try draw(document)
+    let section = try #require(sheets.first { $0.number == "A-301" })
+    #expect(section.title == "Building Section")
+    #expect(section.scale == .quarterInch)
+    #expect(notGenerated(section).isEmpty)
+    // The cut walls on the south and north, and the roof over them.
+    #expect(count(section, layerPrefix: "A-SECT") > 0)
+    // With no units set, its level marks read in feet and inches like the 1/4" sheets around it.
+    let marks: [String] = section.content.items.compactMap { item in
+        guard case let .text(_, string, _, _, _) = item.primitive, string.hasPrefix("GROUND FLOOR") else { return nil }
+        return string
+    }
+    #expect(marks == ["GROUND FLOOR 0'-0\""])
+}
+
+@Test func noWallsNoSection() throws {
+    let document = try model(walls: false, roof: false)
+    #expect(SchematicDrawingSet.defaultSectionLine(document) == nil)
+    let numbers: [String] = try draw(document).map(\.number)
     #expect(!numbers.contains("A-301"))
 }
 

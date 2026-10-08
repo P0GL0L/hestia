@@ -5,8 +5,9 @@ import Foundation
 /// title block, and boxed SCHEMATIC / NOT FOR CONSTRUCTION stamp. Output is not a permit set.
 ///
 /// When the model has no sheets, it draws one floor plan sheet per storey on ARCH D at 1/4" = 1'-0"; once
-/// there are walls, an elevations sheet with all four elevations, each at the largest scale that fits; and once
-/// there is a roof, a roof plan at 1/4" = 1'-0". These sheets exist only in the drawn set, never in the model.
+/// there are walls, an elevations sheet with all four elevations, each at the largest scale that fits, and a
+/// section at 1/4" = 1'-0" cut south to north through the middle of the walls; and once there is a roof, a roof
+/// plan at 1/4" = 1'-0". These sheets exist only in the drawn set, never in the model.
 public struct SchematicDrawingSet: DrawingGenerator {
     /// Printed in the title block's date field, such as `2026-10-06`. Nil prints a dash.
     public var issueDate: String?
@@ -33,12 +34,29 @@ public struct SchematicDrawingSet: DrawingGenerator {
             ]
             sheets.append(Sheet(id: Self.defaultSheetID(document, tag: 0x21), number: "A-201", title: "Elevations",
                                 paper: .archD, scale: nil, views: views))
+            if let line = Self.defaultSectionLine(document) {
+                sheets.append(Sheet(id: Self.defaultSheetID(document, tag: 0x31), number: "A-301",
+                                    title: "Building Section", paper: .archD, scale: .quarterInch,
+                                    views: [.section(line: line)]))
+            }
         }
         if !document.roofs.isEmpty {
             sheets.append(Sheet(id: Self.defaultSheetID(document, tag: 0x41), number: "A-401", title: "Roof Plan",
                                 paper: .archD, scale: .quarterInch, views: [.roofPlan]))
         }
         return sheets
+    }
+
+    /// The cut for the section the set adds on its own: south to north, as on the cottage, at the middle of the
+    /// box around every wall's centerline, from 1'-0" south of it to 1'-0" north. Nil with no walls.
+    static func defaultSectionLine(_ document: ModelDocument) -> SectionLine? {
+        let xs: [Int64] = document.walls.flatMap { [$0.start.x.ticks, $0.end.x.ticks] }
+        let ys: [Int64] = document.walls.flatMap { [$0.start.y.ticks, $0.end.y.ticks] }
+        guard let x0 = xs.min(), let x1 = xs.max(), let y0 = ys.min(), let y1 = ys.max() else { return nil }
+        let foot: Int64 = Length.feet(1).ticks
+        let x = Length(ticks: (x0 + x1) / 2)
+        return SectionLine(start: Point2(x: x, y: Length(ticks: y0 - foot)),
+                           end: Point2(x: x, y: Length(ticks: y1 + foot)))
     }
 
     /// A stable ID for a sheet the set adds on its own: the project's ID with its last byte changed by `tag`.
@@ -100,7 +118,7 @@ public struct SchematicDrawingSet: DrawingGenerator {
         _ view: SheetView, in slot: PaperRect, sheet: Sheet, document: ModelDocument, geometry: any GeometryEngine
     ) throws -> [DisplayItem] {
         let titleAt = paperPoint(slot.minX, slot.minY - mmTicks(8))
-        let units = Self.units(document)
+        let units = self.units(document)
         switch view {
         case let .floorPlan(storeyID):
             let storeyName = document.storeys.first { $0.id == storeyID }?.name ?? "Floor"
@@ -221,8 +239,11 @@ public struct SchematicDrawingSet: DrawingGenerator {
     }
 
     /// The project's display units, else imperial when any sheet uses an inch scale, metric otherwise.
-    static func units(_ document: ModelDocument) -> LengthFormatStyle {
-        DrawingUnits.style(document)
+    /// Units for set-wide text, such as section level marks and schedules: the project's own, else imperial
+    /// when any sheet the set draws has an imperial scale, counting the sheets it adds on its own.
+    func units(_ document: ModelDocument) -> LengthFormatStyle {
+        if let units = document.project.displayUnits { return units }
+        return sheetsToDraw(document).contains { DrawingUnits.isImperial($0.scale) } ? .feetInchesFractions : .metric
     }
 
     static func name(of view: SheetView) -> String {
