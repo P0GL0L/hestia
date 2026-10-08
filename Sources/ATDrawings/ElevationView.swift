@@ -119,7 +119,8 @@ enum ElevationView {
                 let z1 = z0 + opening.height.ticks
                 items.append(DisplayItem(.polyline(points: [at(o0, z0), at(o1, z0), at(o1, z1), at(o0, z1)],
                                                    closed: true), style: openingStyle, elementID: opening.id.rawValue))
-                if !opening.kind.isDoor {
+                // Windows get a mullion down the middle; doors and cased openings are the rectangle alone.
+                if opening.kind.isWindow {
                     let mid = (o0 + o1) / 2
                     items.append(DisplayItem(.line(start: at(mid, z0), end: at(mid, z1)), style: openingStyle,
                                              elementID: opening.id.rawValue))
