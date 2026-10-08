@@ -136,3 +136,50 @@ private func count(_ sheet: SheetDrawing, layerPrefix: String) -> Int {
         #expect(drawn == stored, "\(name)")
     }
 }
+
+/// A north-south wall at `x`, 6" thick unless given, across the 15' box.
+private func northSouth(_ x: Length, _ n: Int, thickness: Length = .inches(6)) -> Wall {
+    Wall(id: WallID(uuid(40 + n)), storeyID: storey, start: Point2(x: x, y: ft(0)), end: Point2(x: x, y: ft(15)),
+         thickness: thickness, height: ft(8))
+}
+
+private func inches(_ feet: Int64, _ inches: Int64) -> Int64 { Length.feet(feet, inchCount: inches).ticks }
+
+@Test func aCutDownAPartitionMovesEastByHalfItsThicknessAndAnInch() throws {
+    var document = try model(walls: true, roof: true)
+    document.walls.append(northSouth(ft(10), 0))
+    let line = try #require(SchematicDrawingSet.defaultSectionLine(document))
+    // 3" half thickness plus 1": 10'-4".
+    #expect(line.start.x.ticks == inches(10, 4))
+    #expect(line.end.x.ticks == inches(10, 4))
+    let sheets = try draw(document)
+    let numbers: [String] = sheets.map(\.number)
+    #expect(numbers.contains("A-301"))
+}
+
+@Test func aWallEastOfTheMoveSendsTheCutWest() throws {
+    let walls: [Wall] = [northSouth(ft(10), 0), northSouth(Length.feet(10, inchCount: 4), 1, thickness: .inches(4))]
+    let x: Int64? = SchematicDrawingSet.sectionX(middle: ft(10).ticks, walls: walls)
+    #expect(x == inches(9, 8))
+}
+
+@Test func wallsOnBothSidesGiveNoCut() throws {
+    let walls: [Wall] = [
+        northSouth(ft(10), 0), northSouth(Length.feet(10, inchCount: 4), 1),
+        northSouth(Length.feet(9, inchCount: 8), 2),
+    ]
+    let x: Int64? = SchematicDrawingSet.sectionX(middle: ft(10).ticks, walls: walls)
+    #expect(x == nil)
+    var document = try model(walls: true, roof: true)
+    document.walls += walls
+    #expect(SchematicDrawingSet.defaultSectionLine(document) == nil)
+    let numbers: [String] = try draw(document).map(\.number)
+    #expect(!numbers.contains("A-301"))
+}
+
+@Test func aMiddleClearOfWallsStaysAtTheMiddle() throws {
+    // A partition off the middle, and east-west walls, leave the cut alone.
+    let walls: [Wall] = [northSouth(ft(6), 0)]
+    let x: Int64? = SchematicDrawingSet.sectionX(middle: ft(10).ticks, walls: walls)
+    #expect(x == ft(10).ticks)
+}
