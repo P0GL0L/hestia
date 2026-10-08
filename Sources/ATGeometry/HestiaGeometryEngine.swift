@@ -142,9 +142,11 @@ public struct HestiaGeometryEngine: GeometryEngine {
     // MARK: - Rooms
 
     /// The room's inner polygon: each boundary wall's centerline moved in by half its thickness, joined in
-    /// boundary order. Nil when the boundary does not close into a polygon.
+    /// boundary order. Consecutive walls on one line, such as a side split around an opening, are one side.
+    /// Nil when the boundary does not close into a polygon, or when walls on one line differ in thickness.
     static func innerPolygon(_ walls: [Wall]) -> [Vec]? {
-        guard walls.count >= 3, let lines = try? walls.map(WallLine.init) else { return nil }
+        guard walls.count >= 3, let pieces = try? walls.map(WallLine.init),
+              let lines = sides(pieces), lines.count >= 3 else { return nil }
         func meet(_ a: (Vec, Vec), _ b: (Vec, Vec)) -> Vec? {
             let denominator = a.1.cross(b.1)
             guard abs(denominator) > 1e-9 else { return nil }
@@ -173,5 +175,30 @@ public struct HestiaGeometryEngine: GeometryEngine {
             inner.append(corner)
         }
         return inner
+    }
+
+    /// Boundary pieces with consecutive collinear ones, wrapping around from the last to the first, folded
+    /// into one side each. Nil when two collinear neighbours differ in thickness: their inner faces are not
+    /// one line, so the room has no single side there.
+    static func sides(_ pieces: [WallLine]) -> [WallLine]? {
+        // Within a hundredth of a millimetre of the other's line, and parallel to a millionth.
+        let tolerance = Double(Length.ticksPerMillimeter) / 100
+        func collinear(_ a: WallLine, _ b: WallLine) -> Bool {
+            abs(a.u.cross(b.u)) < 1e-6 && abs((b.origin - a.origin).cross(a.u)) < tolerance
+        }
+        // Start where a new side begins, so a side that wraps from the last piece to the first stays whole.
+        let count = pieces.count
+        let begins: (Int) -> Bool = { index in !collinear(pieces[(index - 1 + count) % count], pieces[index]) }
+        guard let start = pieces.indices.first(where: begins) else { return nil }
+        var sides: [WallLine] = []
+        for step in 0..<count {
+            let piece = pieces[(start + step) % count]
+            if let last = sides.last, collinear(last, piece) {
+                guard abs(last.half - piece.half) < 1e-9 else { return nil }
+                continue
+            }
+            sides.append(piece)
+        }
+        return sides
     }
 }
