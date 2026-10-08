@@ -15,7 +15,7 @@ struct ContentView: View {
         case opening
         /// Two clicks: the bottom of the stair, then the way it climbs.
         case stair
-        /// One click on a drawn door or wall.
+        /// One click on a drawn opening, stair, or wall, or inside a room.
         case delete
         /// Clicks on drawn walls pick a room's boundary; Add Room makes it.
         case room
@@ -27,7 +27,7 @@ struct ContentView: View {
             case .window: return "Click a wall to add a window."
             case .opening: return "Click a wall to add a cased opening."
             case .stair: return "Click the bottom of the stair, then click the way it climbs."
-            case .delete: return "Click a door or a wall to remove it."
+            case .delete: return "Click a door, window, opening, stair, or wall, or inside a room, to remove it."
             case .room: return "Click walls to add them to the room's boundary or take them out, then Add Room."
             }
         }
@@ -89,7 +89,7 @@ struct ContentView: View {
                 toolButton("Stair", .stair)
                 toolButton("Delete", .delete)
                 toolButton("Room", .room)
-                Button("Roof") { addRoof() }
+                Button(model.groundRoof == nil ? "Roof" : "Remove Roof") { toggleRoof() }
                 if tool == .room {
                     TextField("Room name", text: $roomName)
                         .frame(width: 140)
@@ -193,14 +193,21 @@ struct ContentView: View {
         }
     }
 
-    /// Puts a hip roof over the ground walls, when they close one rectangle.
-    private func addRoof() {
+    /// Removes the ground storey's roof when it has one; otherwise puts a hip roof over the ground walls, when
+    /// they close one rectangle.
+    private func toggleRoof() {
         guard var current = session else { return }
         pendingStart = nil
         do {
-            try current.addRoof()
-            session = current
-            status = "Added a hip roof. Undo removes it."
+            if current.model.groundRoof != nil {
+                try current.removeRoof()
+                session = current
+                status = "Removed the roof. Undo puts it back."
+            } else {
+                try current.addRoof()
+                session = current
+                status = "Added a hip roof. Undo removes it."
+            }
         } catch {
             status = HestiaModel.describe(error)
         }
@@ -263,11 +270,14 @@ struct ContentView: View {
         guard var current = session else { return }
         pendingStart = nil
         do {
-            if try current.delete(atPaper: paper) {
+            if let removed = try current.delete(atPaper: paper) {
                 session = current
-                status = "Removed. Undo puts it back."
+                // A removed wall or room leaves the Room tool's picked boundary too.
+                let walls = Set(current.model.document.walls.map(\.id))
+                roomWalls = roomWalls.filter { walls.contains($0) }
+                status = "Removed \(removed.phrase). Undo puts it back."
             } else {
-                status = "That missed every door and wall. " + Tool.delete.hint
+                status = "That missed everything that can be removed. " + Tool.delete.hint
             }
         } catch {
             status = error.localizedDescription
