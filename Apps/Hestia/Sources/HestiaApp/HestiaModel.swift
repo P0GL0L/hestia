@@ -382,19 +382,76 @@ struct HestiaModel {
                                  kind: .singleDoor, swing: DoorSwing(hinge: .nearStart, opensToward: side))
     }
 
-    /// The door a point of the plan sheet's paper lands on: inside the gap between its jambs, or within 2 mm
-    /// on paper of its drawn symbol (jambs, leaf, and swing). Nil when it lands on no door.
-    func doorHit(paper: Point2) -> OpeningID? {
+    /// The opening of any kind a point of the plan sheet's paper lands on: inside the gap between its jambs, or
+    /// within 2 mm on paper of its drawn symbol (jambs, leaf, swing, and glazing). Nil when it lands on none.
+    func openingHit(paper: Point2) -> OpeningID? {
         guard let transform = planTransform, let storey = groundStorey else { return nil }
         let walls = Dictionary(uniqueKeysWithValues: document.walls.filter { $0.storeyID == storey }.map { ($0.id, $0) })
         let reach = Double(Length.millimeters(2).ticks)
-        for opening in document.openings where opening.kind.isDoor {
+        for opening in document.openings {
             guard let wall = walls[opening.wallID] else { continue }
             if Self.contains(gap(opening, in: wall).map(transform.paper), paper) { return opening.id }
-            let symbol = plan.filter { $0.style.layer == "A-DOOR" && $0.elementID == opening.id.rawValue }
+            let symbol = plan.filter {
+                ($0.style.layer == "A-DOOR" || $0.style.layer == "A-GLAZ") && $0.elementID == opening.id.rawValue
+            }
             if symbol.contains(where: { Self.distance(from: paper, to: $0.primitive) <= reach }) { return opening.id }
         }
         return nil
+    }
+
+    /// The stair whose plan symbol a point of the plan sheet's paper lands on: inside the rectangle of its run
+    /// and width, or within 2 mm on paper of a line of its symbol. Nil when it lands on no stair.
+    func stairHit(paper: Point2) -> StairID? {
+        guard let transform = planTransform, let storey = groundStorey else { return nil }
+        let reach = Double(Length.millimeters(2).ticks)
+        for stair in document.stairs where stair.storeyID == storey {
+            if Self.contains(Self.stairRectangle(stair).map(transform.paper), paper) { return stair.id }
+            let symbol = plan.filter { $0.elementID == stair.id.rawValue }
+            if symbol.contains(where: { Self.distance(from: paper, to: $0.primitive) <= reach }) { return stair.id }
+        }
+        return nil
+    }
+
+    /// A stair's run and width as a rectangle in model space: its centerline from the bottom riser to the top
+    /// edge, half its width to each side.
+    static func stairRectangle(_ stair: Stair) -> [Point2] {
+        let sx = Double(stair.runStart.x.ticks), sy = Double(stair.runStart.y.ticks)
+        let dx = Double(stair.runEnd.x.ticks) - sx, dy = Double(stair.runEnd.y.ticks) - sy
+        let length: Double = max((dx * dx + dy * dy).squareRoot(), 1)
+        let half = Double(stair.width.ticks) / 2
+        let (nx, ny) = (-dy / length * half, dx / length * half)
+        func point(_ x: Double, _ y: Double) -> Point2 {
+            Point2(x: Length(ticks: Int64(x.rounded())), y: Length(ticks: Int64(y.rounded())))
+        }
+        return [point(sx + nx, sy + ny), point(sx - nx, sy - ny),
+                point(sx + dx - nx, sy + dy - ny), point(sx + dx + nx, sy + dy + ny)]
+    }
+
+    /// The ground-storey room a point of the plan sheet's paper falls inside: within the room's centerline
+    /// polygon (the corners its tag is placed from). A room whose walls give no polygon has no inside and is never
+    /// hit. Where rooms overlap, the smallest is the one meant. The caller checks walls and openings first.
+    func roomHit(paper: Point2) -> RoomID? {
+        guard let transform = planTransform, let storey = groundStorey else { return nil }
+        let point = transform.model(paper)
+        var best: (id: RoomID, area: Double)?
+        for room in document.rooms where room.storeyID == storey {
+            guard let outline = RoomOutline.centerline(of: room, in: document), Self.contains(outline, point) else {
+                continue
+            }
+            var twice: Double = 0
+            for (a, b) in zip(outline, outline.dropFirst() + outline.prefix(1)) {
+                twice += Double(a.x.ticks) * Double(b.y.ticks) - Double(b.x.ticks) * Double(a.y.ticks)
+            }
+            let area = abs(twice) / 2
+            if best == nil || area < best!.area { best = (room.id, area) }
+        }
+        return best?.id
+    }
+
+    /// The ground storey's roof, when it has one.
+    var groundRoof: RoofID? {
+        guard let storey = groundStorey else { return nil }
+        return document.roofs.first { $0.storeyID == storey }?.id
     }
 
     /// The opening's gap through its wall in model space: its width along the wall, the wall's thickness across.
@@ -684,17 +741,42 @@ struct EditSession {
         try perform(model.roomCommand(named: name, walls: walls).erased)
     }
 
-    /// Removes what a point of the plan sheet's paper lands on: a door before the wall it sits in, else the
-    /// wall. A miss does nothing and returns false. A crossing, or a wall with openings or rooms, is refused and
-    /// nothing else is removed to make way.
-    mutating func delete(atPaper paper: Point2) throws -> Bool {
-        if let door = model.doorHit(paper: paper) {
-            try perform(RemoveOpeningCommand(openingID: door).erased)
-            return true
+    /// What a delete click removed, for the status line.
+    enum Removed: Equatable {
+        case opening(OpeningKind)
+        case stair
+        case wall
+        case room(String)
+
+        var phrase: String {
+            switch self {
+            case let .opening(kind):
+                if kind == .casedOpening { return "the cased opening" }
+                return kind.isDoor ? "the door" : "the window"
+            case .stair: return "the stair"
+            case .wall: return "the wall"
+            case let .room(name): return name.isEmpty ? "the room" : name
+            }
+        }
+    }
+
+    /// Removes what a point of the plan sheet's paper lands on, first match wins: an opening of any kind, before
+    /// the wall it sits in; then a stair, on its plan symbol; then a wall; then a room, when the point is inside
+    /// it and clear of walls and openings (a room with no inside is a miss). A miss does nothing and returns nil.
+    /// A crossing, or a wall with openings or rooms, is refused, and nothing else is removed to make way.
+    mutating func delete(atPaper paper: Point2) throws -> Removed? {
+        if let id = model.openingHit(paper: paper),
+           let kind = model.document.openings.first(where: { $0.id == id })?.kind {
+            try perform(RemoveOpeningCommand(openingID: id).erased)
+            return .opening(kind)
+        }
+        if let id = model.stairHit(paper: paper) {
+            try perform(RemoveStairCommand(stairID: id).erased)
+            return .stair
         }
         switch model.wallHit(paper: paper) {
         case .none:
-            return false
+            break
         case .ambiguous:
             throw HestiaModel.LoadError(message: "That point is on more than one wall. Click clear of the crossing.")
         case let .wall(id):
@@ -704,8 +786,21 @@ struct EditSession {
                 let reasons = model.dependents(of: id)
                 throw HestiaModel.LoadError(message: "Refused: that wall \(reasons). Remove those first.")
             }
-            return true
+            return .wall
         }
+        if let id = model.roomHit(paper: paper), let room = model.document.rooms.first(where: { $0.id == id }) {
+            try perform(RemoveRoomCommand(roomID: id).erased)
+            return .room(room.name)
+        }
+        return nil
+    }
+
+    /// Removes the ground storey's roof.
+    mutating func removeRoof() throws {
+        guard let id = model.groundRoof else {
+            throw HestiaModel.LoadError(message: "The ground storey has no roof to remove.")
+        }
+        try perform(RemoveRoofCommand(roofID: id).erased)
     }
 
     /// Applies a command, keeping its inverse.
