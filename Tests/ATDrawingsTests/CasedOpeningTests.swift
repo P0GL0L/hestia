@@ -100,3 +100,21 @@ private func model() throws -> ModelDocument {
     let opened = try ModelDocument.decode(from: saved)
     #expect(opened.openings.first { $0.id == OpeningID(uuid(22)) }?.kind == .casedOpening)
 }
+
+@Test func aCasedOpeningInElevationIsTheRectangleOnly() throws {
+    let document = try model()
+    let view = ViewTransform(scale: .quarterInch, modelOrigin: Point2(x: ft(0), y: ft(0)),
+                             paperOrigin: Point2(x: ft(0), y: ft(0)))
+    let items = ElevationView.items(document, .south, view: view)
+    func shapes(_ n: Int) -> (outlines: Int, lines: Int) {
+        let mine = items.filter { $0.elementID == uuid(n) }
+        let outlines = mine.filter { if case .polyline = $0.primitive { return true } else { return false } }.count
+        let lines = mine.filter { if case .line = $0.primitive { return true } else { return false } }.count
+        return (outlines, lines)
+    }
+    // Door: its rectangle. Window: rectangle and mullion. Cased opening: rectangle, no mullion.
+    let door = shapes(20), window = shapes(21), cased = shapes(22)
+    #expect(door.outlines == 1 && door.lines == 0)
+    #expect(window.outlines == 1 && window.lines == 1)
+    #expect(cased.outlines == 1 && cased.lines == 0)
+}
