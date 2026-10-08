@@ -103,7 +103,15 @@ enum SheetFrame {
             DisplayItem(.line(start: paperPoint(block.minX, y), end: paperPoint(block.maxX, y)), style: rule)
         }
         let bottom = block.minY
-        var items = [
+        // Names that run long wrap to two lines, then shrink, so nothing crosses the block's edge.
+        func fitted(_ text: String, baseline: Int64) -> [DisplayItem] {
+            let fit = Self.fit(text, height: mmTicks(4), width: titleBlockWidth - mmTicks(8))
+            let lead: Int64 = fit.lines.count > 1 ? mmTicks(3) : 0
+            return fit.lines.enumerated().map { index, line in
+                label(line, baseline + lead - Int64(index) * 2 * lead, fit.height)
+            }
+        }
+        var items: [DisplayItem] = [
             DisplayItem(.polyline(points: outer.corners(), closed: true), style: border),
             DisplayItem(.line(start: paperPoint(block.minX, block.minY), end: paperPoint(block.minX, block.maxY)), style: border),
             // Sheet number band.
@@ -116,10 +124,14 @@ enum SheetFrame {
             label(issueDate ?? "-", bottom + mmTicks(44), mmTicks(3), x: left + mmTicks(40)),
             ruleAt(bottom + mmTicks(58)),
             label("SHEET TITLE", bottom + mmTicks(76), mmTicks(2)),
-            label(title, bottom + mmTicks(66), mmTicks(4)),
+        ]
+        items += fitted(title, baseline: bottom + mmTicks(66))
+        items += [
             ruleAt(bottom + mmTicks(82)),
             label("PROJECT", bottom + mmTicks(100), mmTicks(2)),
-            label(projectName, bottom + mmTicks(90), mmTicks(4)),
+        ]
+        items += fitted(projectName, baseline: bottom + mmTicks(90))
+        items += [
             ruleAt(bottom + mmTicks(106)),
             label("REVISIONS", bottom + mmTicks(124), mmTicks(2)),
             label("No.   Date   Description", bottom + mmTicks(116), mmTicks(2)),
@@ -137,6 +149,42 @@ enum SheetFrame {
             .text(position: paperPoint(stampBox.center.x.ticks, stampBox.minY + mmTicks(3)), string: "NOT FOR CONSTRUCTION",
                   height: Length(ticks: mmTicks(3)), rotation: .degrees(0), alignment: .center), style: border))
         return items
+    }
+
+    /// Text for a title block line no wider than `width`: one line at `height` when it fits; else two lines,
+    /// split at the space that best balances them, at up to 3 mm; else those lines shrunk to fit, but never
+    /// under 2 mm, cutting the second line short with "..." if even that is too wide.
+    static func fit(_ text: String, height: Int64, width: Int64) -> (lines: [String], height: Int64) {
+        func wide(_ line: String, _ cap: Int64) -> Double { HelveticaMetrics.width(of: line) * Double(cap) / 0.718 }
+        let room = Double(width)
+        if wide(text, height) <= room { return ([text], height) }
+        let two: Int64 = min(height, mmTicks(3))
+        let floor: Int64 = mmTicks(2)
+        let words = text.split(separator: " ").map(String.init)
+        var best: [String] = [text]
+        var bestWidth = wide(text, 1)
+        for cut in 1..<max(words.count, 1) {
+            let first = words[..<cut].joined(separator: " "), second = words[cut...].joined(separator: " ")
+            let longer = max(wide(first, 1), wide(second, 1))
+            if longer < bestWidth { best = [first, second]; bestWidth = longer }
+        }
+        let needed = Int64((room / bestWidth).rounded(.down))
+        let cap = max(min(two, needed), floor)
+        guard bestWidth * Double(cap) > room else { return (best, cap) }
+        // Still too wide at the smallest size: fill the first line word by word, cut the second one short.
+        var first = ""
+        var rest = words[...]
+        while let word = rest.first {
+            let next = first.isEmpty ? word : first + " " + word
+            guard wide(next, cap) <= room else { break }
+            first = next
+            rest = rest.dropFirst()
+        }
+        var second = rest.joined(separator: " ")
+        if first.isEmpty { swap(&first, &second) }
+        while !second.isEmpty && wide(second + "...", cap) > room { second.removeLast() }
+        while !first.isEmpty && wide(first, cap) > room { first.removeLast() }
+        return ([first, second + "..."], cap)
     }
 
     /// A view title under a view: name, then scale.
