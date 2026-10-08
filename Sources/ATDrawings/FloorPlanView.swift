@@ -107,7 +107,7 @@ enum FloorPlanView {
     }
 
     /// Jambs across the wall, then a swing and leaf for hinged doors, a slide line for other doors, and
-    /// glazing lines for windows.
+    /// glazing lines for windows. A cased opening is its two jambs only.
     static func symbol(for opening: Opening, in wall: Wall, view: ViewTransform) -> [DisplayItem] {
         let sx = Double(wall.start.x.ticks), sy = Double(wall.start.y.ticks)
         let dx = Double(wall.end.x.ticks) - sx, dy = Double(wall.end.y.ticks) - sy
@@ -123,11 +123,14 @@ enum FloorPlanView {
                                   Int64((sy + uy * along + ny * across).rounded())))
         }
         let id = opening.id.rawValue
-        let style = opening.kind.isDoor ? doorStyle : glazingStyle
+        let style = opening.kind.isWindow ? glazingStyle : doorStyle
         var items = [
             DisplayItem(.line(start: at(a, -half), end: at(a, half)), style: style, elementID: id),
             DisplayItem(.line(start: at(b, -half), end: at(b, half)), style: style, elementID: id),
         ]
+        if opening.kind == .casedOpening {
+            return items
+        }
         if !opening.kind.isDoor {
             for across in [-half / 3, half / 3] {
                 items.append(DisplayItem(.line(start: at(a, across), end: at(b, across)), style: style, elementID: id))

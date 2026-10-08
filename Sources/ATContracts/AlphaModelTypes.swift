@@ -48,8 +48,14 @@ public struct SheetID: UUIDIdentifier {
 public enum OpeningKind: String, Codable, Hashable, Sendable, CaseIterable {
     case singleDoor, doubleDoor, slidingDoor, pocketDoor, foldingDoor, garageDoor
     case window, bayWindow, cornerWindow, roundWindow, floorToCeilingWindow
+    /// A doorless opening, such as a hall or closet opening: jambs only, no leaf and no glass. Its name must not
+    /// end in "Door", or it would count as a door.
+    case casedOpening
 
     public var isDoor: Bool { rawValue.hasSuffix("Door") }
+
+    /// Glazed openings: everything that is neither a door nor a cased opening.
+    public var isWindow: Bool { !isDoor && self != .casedOpening }
 }
 
 /// How a hinged door swings, relative to its host wall's start → end direction.

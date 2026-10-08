@@ -187,10 +187,11 @@ public struct SetOpeningKindCommand: Command {
 
     public static let commandName = "set_opening_kind"
     public static let toolDescription =
-        "Change an opening to a different door or window type, and set or clear a hinged door's swing."
+        "Change an opening to a different door, window, or cased opening type, and set or clear a hinged door's swing."
     public static let parameters = [
         CommandParameter("openingID", .id, "ID of the opening."),
-        CommandParameter("kind", .choice, "New door or window type.", allowedValues: OpeningKind.allCases.map(\.rawValue)),
+        CommandParameter("kind", .choice, "New door, window, or cased opening type.",
+                         allowedValues: OpeningKind.allCases.map(\.rawValue)),
         swingParameter,
     ]
 
@@ -213,7 +214,7 @@ public struct SetOpeningKindCommand: Command {
 
 let openingKindParameter = CommandParameter(
     "kind", .choice, required: false,
-    "Door or window type; omit for a single door when the sill is zero, otherwise a window.",
+    "Door, window, or cased opening type; omit for a single door when the sill is zero, otherwise a window.",
     allowedValues: OpeningKind.allCases.map(\.rawValue)
 )
 
