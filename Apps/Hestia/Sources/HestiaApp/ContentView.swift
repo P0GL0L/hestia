@@ -70,6 +70,46 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            // File and Undo on the left, export on the right; the tools on their own row below. Each group keeps
+            // its ideal width, so no label is cut short at the narrowest window.
+            HStack(spacing: 12) {
+                HStack(spacing: 6) {
+                    Button("New") { newModel() }
+                    Button("Open…") { openModel() }
+                    Button("Save…") { saveModel(model) }
+                    Button("Undo") { undo() }
+                        .keyboardShortcut("z", modifiers: .command)
+                        .disabled(!(session?.canUndo ?? false))
+                }
+                .fixedSize()
+                Spacer(minLength: 12)
+                HStack(spacing: 6) {
+                    Button("Export PDF") { exportPDF(model) }
+                    Button("Export DXF") { exportDXF(model) }
+                }
+                .fixedSize()
+            }
+            HStack(spacing: 6) {
+                HStack(spacing: 6) {
+                    toolButton("Wall", .wall)
+                    toolButton("Door", .door)
+                    toolButton("Window", .window)
+                    toolButton("Opening", .opening)
+                    toolButton("Stair", .stair)
+                    toolButton("Delete", .delete)
+                    toolButton("Room", .room)
+                    Button(model.groundRoof == nil ? "Roof" : "Remove Roof") { toggleRoof() }
+                }
+                .fixedSize()
+                if tool == .room {
+                    TextField("Room name", text: $roomName)
+                        .frame(width: 140)
+                    Button("Add Room") { addRoom() }
+                        .disabled(roomWalls.isEmpty)
+                        .fixedSize()
+                }
+                Spacer(minLength: 0)
+            }
             HStack(spacing: 12) {
                 PlanCanvas(items: model.plan, bounds: model.planBounds, pendingStart: pendingStart,
                            selected: Set(roomWalls.map(\.rawValue)), onClick: { paper in click(paper) })
@@ -78,36 +118,19 @@ struct ContentView: View {
                 OrbitScene(meshes: model.meshes, sessionID: sessionID)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            HStack {
-                Button("New") { newModel() }
-                Button("Open…") { openModel() }
-                Button("Save…") { saveModel(model) }
-                toolButton("Wall", .wall)
-                toolButton("Door", .door)
-                toolButton("Window", .window)
-                toolButton("Opening", .opening)
-                toolButton("Stair", .stair)
-                toolButton("Delete", .delete)
-                toolButton("Room", .room)
-                Button(model.groundRoof == nil ? "Roof" : "Remove Roof") { toggleRoof() }
-                if tool == .room {
-                    TextField("Room name", text: $roomName)
-                        .frame(width: 140)
-                    Button("Add Room") { addRoom() }
-                        .disabled(roomWalls.isEmpty)
-                }
-                Button("Undo") { undo() }
-                    .keyboardShortcut("z", modifiers: .command)
-                    .disabled(!(session?.canUndo ?? false))
+            // The status on its own line; where the last export went, at the right of it.
+            HStack(spacing: 12) {
                 Text(status)
-                    .font(.caption)
-                Spacer()
-                Button("Export PDF") { exportPDF(model) }
-                Button("Export DXF") { exportDXF(model) }
+                    .font(.callout)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .layoutPriority(1)
+                Spacer(minLength: 12)
                 Text(exportMessage)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
         }
         .padding(16)
