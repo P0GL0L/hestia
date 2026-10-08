@@ -48,15 +48,36 @@ public struct SchematicDrawingSet: DrawingGenerator {
     }
 
     /// The cut for the section the set adds on its own: south to north, as on the cottage, at the middle of the
-    /// box around every wall's centerline, from 1'-0" south of it to 1'-0" north. Nil with no walls.
+    /// box around every wall's centerline, from 1'-0" south of it to 1'-0" north. A cut down a north-south wall's
+    /// centerline would draw that whole wall as cut, so it moves east by half that wall's thickness plus 1", or,
+    /// when that lands inside another north-south wall, west by the same amount. Nil with no walls, or when both
+    /// sides land inside walls.
     static func defaultSectionLine(_ document: ModelDocument) -> SectionLine? {
         let xs: [Int64] = document.walls.flatMap { [$0.start.x.ticks, $0.end.x.ticks] }
         let ys: [Int64] = document.walls.flatMap { [$0.start.y.ticks, $0.end.y.ticks] }
         guard let x0 = xs.min(), let x1 = xs.max(), let y0 = ys.min(), let y1 = ys.max() else { return nil }
         let foot: Int64 = Length.feet(1).ticks
-        let x = Length(ticks: (x0 + x1) / 2)
+        guard let cut = sectionX(middle: (x0 + x1) / 2, walls: document.walls) else { return nil }
+        let x = Length(ticks: cut)
         return SectionLine(start: Point2(x: x, y: Length(ticks: y0 - foot)),
                            end: Point2(x: x, y: Length(ticks: y1 + foot)))
+    }
+
+    /// Where a south-to-north cut goes near `middle`, clear of running down a north-south wall.
+    static func sectionX(middle: Int64, walls: [Wall]) -> Int64? {
+        let northSouth: [Wall] = walls.filter { wall in
+            wall.start.x.ticks == wall.end.x.ticks && wall.start.y.ticks != wall.end.y.ticks
+        }
+        let onCut: [Wall] = northSouth.filter { $0.start.x.ticks == middle }
+        guard let thickest = onCut.map(\.thickness.ticks).max() else { return middle }
+        let shift: Int64 = thickest / 2 + Length.inches(1).ticks
+        // Inside a north-south wall: within half its thickness of its centerline.
+        func inside(_ x: Int64) -> Bool {
+            northSouth.contains { abs($0.start.x.ticks - x) <= $0.thickness.ticks / 2 }
+        }
+        if !inside(middle + shift) { return middle + shift }
+        if !inside(middle - shift) { return middle - shift }
+        return nil
     }
 
     /// A stable ID for a sheet the set adds on its own: the project's ID with its last byte changed by `tag`.
