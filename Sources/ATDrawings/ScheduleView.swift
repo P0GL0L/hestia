@@ -13,7 +13,7 @@ enum ScheduleView {
         var rows: [[String]]
     }
 
-    /// Door marks D1, D2, … and window marks W1, W2, … in model order.
+    /// Door marks D1, D2, … and window marks W1, W2, … in model order. Cased openings get no mark.
     static func marks(_ document: ModelDocument) -> [OpeningID: String] {
         var marks: [OpeningID: String] = [:]
         var doors = 0, windows = 0
@@ -21,7 +21,7 @@ enum ScheduleView {
             if opening.kind.isDoor {
                 doors += 1
                 marks[opening.id] = "D\(doors)"
-            } else {
+            } else if opening.kind.isWindow {
                 windows += 1
                 marks[opening.id] = "W\(windows)"
             }
@@ -52,7 +52,7 @@ enum ScheduleView {
                 title: "Window Schedule",
                 columns: [("MARK", mmTicks(16)), ("TYPE", mmTicks(40)), ("WIDTH", mmTicks(26)),
                           ("HEIGHT", mmTicks(26)), ("SILL", mmTicks(26))],
-                rows: document.openings.filter { !$0.kind.isDoor }.map { window in
+                rows: document.openings.filter(\.kind.isWindow).map { window in
                     [marks[window.id] ?? "", words(window.kind.rawValue), width(window), f(window.height),
                      f(window.sillHeight)]
                 })
