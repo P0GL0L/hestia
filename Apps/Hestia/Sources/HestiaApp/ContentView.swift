@@ -13,6 +13,8 @@ struct ContentView: View {
         case window
         /// One click on a drawn wall.
         case opening
+        /// Two clicks: the bottom of the stair, then the way it climbs.
+        case stair
         /// One click on a drawn door or wall.
         case delete
         /// Clicks on drawn walls pick a room's boundary; Add Room makes it.
@@ -24,6 +26,7 @@ struct ContentView: View {
             case .door: return "Click a wall to add a door."
             case .window: return "Click a wall to add a window."
             case .opening: return "Click a wall to add a cased opening."
+            case .stair: return "Click the bottom of the stair, then click the way it climbs."
             case .delete: return "Click a door or a wall to remove it."
             case .room: return "Click walls to add them to the room's boundary or take them out, then Add Room."
             }
@@ -83,6 +86,7 @@ struct ContentView: View {
                 toolButton("Door", .door)
                 toolButton("Window", .window)
                 toolButton("Opening", .opening)
+                toolButton("Stair", .stair)
                 toolButton("Delete", .delete)
                 toolButton("Room", .room)
                 Button("Roof") { addRoof() }
@@ -130,7 +134,8 @@ struct ContentView: View {
     }
 
     /// With the Door tool, or an Option-click, a click on a wall adds a door; with the Window tool, a window; with
-    /// the Opening tool, a cased opening. With the Delete tool a click removes the door or wall under it. With the Wall tool the first click starts
+    /// the Opening tool, a cased opening. With the Stair tool the first click sets a stair's bottom and the
+    /// second the way it climbs. With the Delete tool a click removes the door or wall under it. With the Wall tool the first click starts
     /// a wall; the second ends it and adds it to the ground storey.
     private func click(_ paper: Point2) {
         guard var current = session else { return }
@@ -152,6 +157,10 @@ struct ContentView: View {
         }
         if tool == .room {
             toggleRoomWall(paper)
+            return
+        }
+        if tool == .stair {
+            stairClick(paper)
             return
         }
         guard let start = pendingStart else {
@@ -207,6 +216,29 @@ struct ContentView: View {
             } else {
                 status = "That missed every wall. " + Tool.window.hint
             }
+        } catch {
+            status = HestiaModel.describe(error)
+        }
+    }
+
+    /// The first click sets the stair's bottom; the second, the way it climbs, and adds it.
+    private func stairClick(_ paper: Point2) {
+        guard var current = session else { return }
+        guard let start = pendingStart else {
+            pendingStart = paper
+            status = "Click the way the stair climbs."
+            return
+        }
+        pendingStart = nil
+        do {
+            let stair = try current.addStair(fromPaper: start, towardPaper: paper)
+            session = current
+            let model = current.model
+            let dx = Double(stair.runEnd.x.ticks - stair.runStart.x.ticks)
+            let dy = Double(stair.runEnd.y.ticks - stair.runStart.y.ticks)
+            let run = Length(ticks: Int64((dx * dx + dy * dy).squareRoot().rounded()))
+            status = "Added a stair: \(stair.riserCount) risers of \(model.written(stair.riserHeight)), "
+                + "\(model.written(run)) run. Undo removes it."
         } catch {
             status = HestiaModel.describe(error)
         }
