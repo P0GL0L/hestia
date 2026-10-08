@@ -5,8 +5,8 @@ import Foundation
 enum ElementMeshes {
     // MARK: - Walls
 
-    /// Full-height pieces between openings, sill and head pieces at each opening, and glass or a door leaf
-    /// in each opening on the wall's centre plane.
+    /// Full-height pieces between openings, sill and head pieces at each opening, and glass in each window or a
+    /// leaf in each door on the wall's centre plane. A cased opening gets neither.
     static func wall(_ wall: Wall, footprint: [Point2], openings: [Opening], base: Double) throws -> [Mesh] {
         let line = try WallLine(wall)
         let polygon = footprint.map(Vec.init)
@@ -31,10 +31,11 @@ enum ElementMeshes {
             if opening.kind.isDoor {
                 leaf.face(pane, normal: (n.x, n.y, 0))
                 leaf.face(pane.reversed(), normal: (-n.x, -n.y, 0))
-            } else {
+            } else if opening.kind.isWindow {
                 glass.face(pane, normal: (n.x, n.y, 0))
                 glass.face(pane.reversed(), normal: (-n.x, -n.y, 0))
             }
+            // A cased opening is left open: no glass and no leaf.
         }
         return [solid.mesh(elementID: wall.id.rawValue, material: "wall"),
                 glass.mesh(elementID: wall.id.rawValue, material: "glass"),
