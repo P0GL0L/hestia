@@ -103,6 +103,12 @@ struct HestiaModel {
     static let defaultDoorHeight: Length = .feet(6, inchCount: 8)
     static let defaultDoorSill: Length = .feet(0)
 
+    /// A straight stair's size when the storey has none to copy: the cottage's, 3'-0" wide with 10" treads and
+    /// risers of at most 8".
+    static let defaultStairWidth: Length = .feet(3)
+    static let defaultStairTread: Length = .inches(10)
+    static let maximumRiser: Length = .inches(8)
+
     /// The cottage fixture, from the app bundle or, when run from the repository, its fixtures folder.
     static func cottage() throws -> HestiaModel {
         guard let url = fixtureURL(named: "rect-cottage") else {
@@ -237,6 +243,51 @@ struct HestiaModel {
         ]
         return AddRoofCommand(roofID: id, storeyID: storey, footprint: footprint, eaveHeight: height,
                               pitchRisePer12: Self.defaultRoofPitch, overhang: Self.defaultRoofOverhang)
+    }
+
+    /// A straight stair on the ground storey with a new ID, its bottom riser at `start` on its centerline, climbing
+    /// toward `toward`. Its width, risers, and run length come from a stair already on that storey; with none to
+    /// copy, it is 3'-0" wide with 10" treads and the fewest equal risers (at least 2) of at most 8" that reach
+    /// the storey's wall height (8'-0" with no walls), each rounded to the tick. Walls of more than one height
+    /// are refused. The run is one tread fewer than the risers, so the second point sets only the direction.
+    func stairCommand(from start: Point2, toward: Point2, id: StairID = StairID(UUID())) throws -> AddStairCommand {
+        guard let storey = groundStorey else { throw LoadError(message: "The model has no storey to put a stair on.") }
+        var dx = Double(toward.x.ticks - start.x.ticks), dy = Double(toward.y.ticks - start.y.ticks)
+        let distance: Double = (dx * dx + dy * dy).squareRoot()
+        guard distance > 0 else {
+            throw LoadError(message: "Both clicks land on the same point. Click the way the stair climbs.")
+        }
+        (dx, dy) = (dx / distance, dy / distance)
+        let width: Length, riserCount: Int, riserHeight: Length, tread: Double
+        if let copied = document.stairs.first(where: { $0.storeyID == storey && $0.riserCount >= 2 }) {
+            width = copied.width
+            riserCount = copied.riserCount
+            riserHeight = copied.riserHeight
+            let rx = Double(copied.runEnd.x.ticks - copied.runStart.x.ticks)
+            let ry = Double(copied.runEnd.y.ticks - copied.runStart.y.ticks)
+            tread = (rx * rx + ry * ry).squareRoot() / Double(copied.riserCount - 1)
+        } else {
+            let heights = Set(document.walls.filter { $0.storeyID == storey }.map(\.height.ticks))
+            guard heights.count <= 1 else {
+                throw LoadError(message: "The ground walls are not all one height, so the stair's rise is not set.")
+            }
+            let rise: Int64 = heights.first ?? Self.defaultWallHeight.ticks
+            let most: Int64 = Self.maximumRiser.ticks
+            riserCount = max(2, Int((rise + most - 1) / most))
+            riserHeight = Length(ticks: (rise + Int64(riserCount) / 2) / Int64(riserCount))
+            width = Self.defaultStairWidth
+            tread = Double(Self.defaultStairTread.ticks)
+        }
+        let run: Double = tread * Double(riserCount - 1)
+        let end = Point2(x: Length(ticks: start.x.ticks + Int64((dx * run).rounded())),
+                         y: Length(ticks: start.y.ticks + Int64((dy * run).rounded())))
+        return AddStairCommand(stairID: id, storeyID: storey, kind: .straight, runStart: start, runEnd: end,
+                               width: width, riserCount: riserCount, riserHeight: riserHeight)
+    }
+
+    /// A length as the project writes it: millimetres on a metric project, else feet and inches.
+    func written(_ length: Length) -> String {
+        LengthFormatting.format(length, style: document.project.displayUnits ?? .feetInchesFractions)
     }
 
     /// A window in a wall, centered on a model point projected onto the wall's centerline, with a new ID. Its
@@ -576,6 +627,21 @@ struct EditSession {
             try perform(model.doorCommand(on: id, at: point).erased)
             return true
         }
+    }
+
+    /// Adds a straight stair from its bottom riser at one point of the plan sheet's paper, climbing toward a
+    /// second. Both points are snapped to the project's grid, as a wall's ends are. Returns the stair as added.
+    @discardableResult
+    mutating func addStair(fromPaper start: Point2, towardPaper toward: Point2) throws -> Stair {
+        guard let a = model.modelPoint(paper: start), let b = model.modelPoint(paper: toward) else {
+            throw HestiaModel.LoadError(message: "The plan has no placement to draw on.")
+        }
+        let command = try model.stairCommand(from: model.snapped(a), toward: model.snapped(b))
+        try perform(command.erased)
+        guard let stair = model.document.stairs.first(where: { $0.id == command.stairID }) else {
+            throw HestiaModel.LoadError(message: "The stair was not added.")
+        }
+        return stair
     }
 
     /// Adds a hip roof over the ground walls when they close one rectangle.
