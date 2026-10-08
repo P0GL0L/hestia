@@ -11,6 +11,8 @@ struct ContentView: View {
         case door
         /// One click on a drawn wall.
         case window
+        /// One click on a drawn wall.
+        case opening
         /// One click on a drawn door or wall.
         case delete
         /// Clicks on drawn walls pick a room's boundary; Add Room makes it.
@@ -21,6 +23,7 @@ struct ContentView: View {
             case .wall: return "Click two points on the plan to add a wall."
             case .door: return "Click a wall to add a door."
             case .window: return "Click a wall to add a window."
+            case .opening: return "Click a wall to add a cased opening."
             case .delete: return "Click a door or a wall to remove it."
             case .room: return "Click walls to add them to the room's boundary or take them out, then Add Room."
             }
@@ -79,6 +82,7 @@ struct ContentView: View {
                 toolButton("Wall", .wall)
                 toolButton("Door", .door)
                 toolButton("Window", .window)
+                toolButton("Opening", .opening)
                 toolButton("Delete", .delete)
                 toolButton("Room", .room)
                 Button("Roof") { addRoof() }
@@ -125,8 +129,8 @@ struct ContentView: View {
         status = choice.hint
     }
 
-    /// With the Door tool, or an Option-click, a click on a wall adds a door; with the Window tool, a window.
-    /// With the Delete tool a click removes the door or wall under it. With the Wall tool the first click starts
+    /// With the Door tool, or an Option-click, a click on a wall adds a door; with the Window tool, a window; with
+    /// the Opening tool, a cased opening. With the Delete tool a click removes the door or wall under it. With the Wall tool the first click starts
     /// a wall; the second ends it and adds it to the ground storey.
     private func click(_ paper: Point2) {
         guard var current = session else { return }
@@ -136,6 +140,10 @@ struct ContentView: View {
         }
         if tool == .window {
             addWindow(paper)
+            return
+        }
+        if tool == .opening {
+            addCasedOpening(paper)
             return
         }
         if tool == .delete {
@@ -198,6 +206,21 @@ struct ContentView: View {
                 status = "Added a window. Undo removes it."
             } else {
                 status = "That missed every wall. " + Tool.window.hint
+            }
+        } catch {
+            status = HestiaModel.describe(error)
+        }
+    }
+
+    private func addCasedOpening(_ paper: Point2) {
+        guard var current = session else { return }
+        pendingStart = nil
+        do {
+            if try current.addCasedOpening(atPaper: paper) {
+                session = current
+                status = "Added a cased opening. Undo removes it."
+            } else {
+                status = "That missed every wall. " + Tool.opening.hint
             }
         } catch {
             status = HestiaModel.describe(error)
