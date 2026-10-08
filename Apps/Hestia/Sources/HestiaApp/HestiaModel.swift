@@ -93,6 +93,11 @@ struct HestiaModel {
     static let defaultWindowHeight: Length = .feet(4)
     static let defaultWindowSill: Length = .feet(3)
 
+    /// A cased opening's size when the storey has none to copy.
+    static let defaultCasedWidth: Length = .feet(3)
+    static let defaultCasedHeight: Length = .feet(6, inchCount: 8)
+    static let defaultCasedSill: Length = .feet(0)
+
     /// A door's size when the storey has none to copy: the cottage's single door.
     static let defaultDoorWidth: Length = .feet(3)
     static let defaultDoorHeight: Length = .feet(6, inchCount: 8)
@@ -239,24 +244,44 @@ struct HestiaModel {
     /// common window: 4'-0" by 4'-0" with a 3'-0" sill. It has no swing. The offset is rounded to a whole inch,
     /// or 10 mm on a metric project, and kept within the wall.
     func windowCommand(on wallID: WallID, at point: Point2, id: OpeningID = OpeningID(UUID())) throws -> AddOpeningCommand {
+        try unswungCommand(on: wallID, at: point, id: id, kind: .window, copies: { $0.isWindow }, name: "window",
+                           defaults: (Self.defaultWindowWidth, Self.defaultWindowHeight, Self.defaultWindowSill))
+    }
+
+    /// A cased opening (no door, no glass) in a wall, centered on a model point projected onto the wall's
+    /// centerline, with a new ID. Its width, height, and sill come from a cased opening already on that storey,
+    /// or, with none to copy, 3'-0" by 6'-8" on the floor. It has no swing. The offset is rounded as a window's.
+    func casedOpeningCommand(on wallID: WallID, at point: Point2, id: OpeningID = OpeningID(UUID())) throws
+        -> AddOpeningCommand {
+        try unswungCommand(on: wallID, at: point, id: id, kind: .casedOpening, copies: { $0 == .casedOpening },
+                           name: "cased opening",
+                           defaults: (Self.defaultCasedWidth, Self.defaultCasedHeight, Self.defaultCasedSill))
+    }
+
+    /// An opening with no swing, centered on the click: sized from the first opening on the storey whose kind
+    /// `copies` accepts, else from `defaults`; its offset is rounded to the snap step and kept within the wall.
+    private func unswungCommand(
+        on wallID: WallID, at point: Point2, id: OpeningID, kind: OpeningKind, copies: (OpeningKind) -> Bool,
+        name: String, defaults: (width: Length, height: Length, sill: Length)
+    ) throws -> AddOpeningCommand {
         guard let wall = document.walls.first(where: { $0.id == wallID }) else {
             throw LoadError(message: "That wall is not in the model.")
         }
         let storeyWalls = Set(document.walls.filter { $0.storeyID == wall.storeyID }.map(\.id))
-        let copied = document.openings.first { !$0.kind.isDoor && storeyWalls.contains($0.wallID) }
-        let width: Length = copied?.width ?? Self.defaultWindowWidth
-        let height: Length = copied?.height ?? Self.defaultWindowHeight
-        let sill: Length = copied?.sillHeight ?? Self.defaultWindowSill
+        let copied = document.openings.first { copies($0.kind) && storeyWalls.contains($0.wallID) }
+        let width: Length = copied?.width ?? defaults.width
+        let height: Length = copied?.height ?? defaults.height
+        let sill: Length = copied?.sillHeight ?? defaults.sill
         let sx = Double(wall.start.x.ticks), sy = Double(wall.start.y.ticks)
         let dx = Double(wall.end.x.ticks) - sx, dy = Double(wall.end.y.ticks) - sy
         let length: Double = (dx * dx + dy * dy).squareRoot()
         let span = Double(width.ticks)
-        guard length > span else { throw LoadError(message: "That wall is shorter than a window.") }
+        guard length > span else { throw LoadError(message: "That wall is shorter than a \(name).") }
         let along: Double = ((Double(point.x.ticks) - sx) * dx + (Double(point.y.ticks) - sy) * dy) / length
         let step = Double(snapStep.ticks)
         let offset: Double = min(max(((along - span / 2) / step).rounded() * step, 0), length - span)
         return AddOpeningCommand(openingID: id, wallID: wallID, offsetAlongWall: Length(ticks: Int64(offset)),
-                                 width: width, height: height, sillHeight: sill, kind: .window, swing: nil)
+                                 width: width, height: height, sillHeight: sill, kind: kind, swing: nil)
     }
 
     /// A single door in a wall, centered on a model point projected onto the wall's centerline, with a new ID.
@@ -561,6 +586,18 @@ struct EditSession {
     /// Adds a single window where a point of the plan sheet's paper falls on a drawn wall. A point off every
     /// wall does nothing and returns false; a point on more than one wall is refused.
     mutating func addWindow(atPaper paper: Point2) throws -> Bool {
+        try addOnWall(atPaper: paper) { model, id, point in try model.windowCommand(on: id, at: point) }
+    }
+
+    /// Adds a single cased opening where a point of the plan sheet's paper falls on a drawn wall. A point off
+    /// every wall does nothing and returns false; a point on more than one wall is refused.
+    mutating func addCasedOpening(atPaper paper: Point2) throws -> Bool {
+        try addOnWall(atPaper: paper) { model, id, point in try model.casedOpeningCommand(on: id, at: point) }
+    }
+
+    private mutating func addOnWall(
+        atPaper paper: Point2, _ command: (HestiaModel, WallID, Point2) throws -> AddOpeningCommand
+    ) throws -> Bool {
         switch model.wallHit(paper: paper) {
         case .none:
             return false
@@ -570,7 +607,7 @@ struct EditSession {
             guard let point = model.modelPoint(paper: paper) else {
                 throw HestiaModel.LoadError(message: "The plan has no placement to draw on.")
             }
-            try perform(model.windowCommand(on: id, at: point).erased)
+            try perform(command(model, id, point).erased)
             return true
         }
     }
