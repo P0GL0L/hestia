@@ -4,7 +4,8 @@ import Foundation
 /// The geometry engine the app and drawings use with a live model.
 ///
 /// Plan view: walls on the storey are joined (L, T, X, any angle) and cut at doors and windows that the plan
-/// cut plane passes through; walls lower than the cut plane, and columns and stairs, are classified to match.
+/// cut plane passes through; an opening wholly above the cut splits the wall too, its span seen beyond. Walls
+/// lower than the cut plane, and columns and stairs, are classified to match.
 /// Room areas come from each room's boundary walls, measured face to face. Meshes cover walls, openings,
 /// slabs, columns, beams, stairs, and roofs.
 public struct HestiaGeometryEngine: GeometryEngine {
@@ -26,11 +27,14 @@ public struct HestiaGeometryEngine: GeometryEngine {
         for wall in walls {
             guard let footprint = footprints[wall.id] else { continue }
             let classification: OutlineClassification = wall.height.ticks > cut ? .cut : .beyond
-            let openings = document.openings
-                .filter { $0.wallID == wall.id && $0.sillHeight.ticks < cut && $0.sillHeight.ticks + $0.height.ticks > cut }
-            for piece in try Self.pieces(of: footprint, wall: wall, cutAt: openings) {
+            let hosted = document.openings.filter { $0.wallID == wall.id && $0.sillHeight.ticks + $0.height.ticks > cut }
+            // An opening the cut passes through leaves a gap; one wholly above the cut leaves a span seen beyond.
+            let crossing = hosted.filter { $0.sillHeight.ticks < cut }
+            let above = hosted.filter { $0.sillHeight.ticks >= cut }
+            for piece in try Self.planPieces(of: footprint, wall: wall, gaps: crossing, beyond: above) {
                 outlines.append(ClassifiedOutline(elementID: wall.id.rawValue, kind: .wall,
-                                                  classification: classification, polygon: piece))
+                                                  classification: piece.beyond ? .beyond : classification,
+                                                  polygon: piece.polygon))
             }
         }
         for column in document.columns where column.storeyID == storey {
@@ -111,6 +115,39 @@ public struct HestiaGeometryEngine: GeometryEngine {
         }
         pieces.append(PolygonMath.clip(polygon, keepingBelow: -lower) { -line.along($0) })
         return pieces.filter { abs(PolygonMath.twiceSignedArea($0)) > 1 }.map { $0.map { $0.rounded() } }
+    }
+
+    /// The footprint split for the plan at every opening in `gaps` and `beyond`, in counterclockwise pieces along
+    /// the wall. A gap's span is left out; a beyond opening's span is its own piece, flagged so it is drawn as
+    /// seen beyond the cut. The pieces between openings are the wall itself.
+    static func planPieces(of footprint: [Point2], wall: Wall, gaps: [Opening], beyond: [Opening]) throws
+        -> [(polygon: [Point2], beyond: Bool)] {
+        guard !(gaps.isEmpty && beyond.isEmpty) else { return [(footprint, false)] }
+        let polygon = footprint.map(Vec.init)
+        let line = try WallLine(wall)
+        var spans: [(a: Double, b: Double, beyond: Bool)] = []
+        for opening in gaps + beyond {
+            let start = Double(opening.offsetAlongWall.ticks)
+            spans.append((start, start + Double(opening.width.ticks), beyond.contains(opening)))
+        }
+        spans.sort { $0.a < $1.a }
+        /// The footprint between two distances along the wall.
+        func between(_ low: Double, _ high: Double) -> [Vec] {
+            var piece = polygon
+            if high.isFinite { piece = PolygonMath.clip(piece, keepingBelow: high) { line.along($0) } }
+            if low.isFinite { piece = PolygonMath.clip(piece, keepingBelow: -low) { -line.along($0) } }
+            return piece
+        }
+        var pieces: [(polygon: [Vec], beyond: Bool)] = []
+        var lower = -Double.infinity
+        for span in spans {
+            pieces.append((between(lower, span.a), false))
+            if span.beyond { pieces.append((between(span.a, span.b), true)) }
+            lower = span.b
+        }
+        pieces.append((between(lower, .infinity), false))
+        return pieces.filter { abs(PolygonMath.twiceSignedArea($0.polygon)) > 1 }
+            .map { ($0.polygon.map { $0.rounded() }, $0.beyond) }
     }
 
     static func columnOutline(_ column: Column) -> [Point2] {
