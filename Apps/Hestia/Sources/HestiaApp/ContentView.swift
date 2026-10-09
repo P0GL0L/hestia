@@ -47,7 +47,13 @@ struct ContentView: View {
     @State private var windowID = UUID()
     /// The model area the plan view shows. It grows when the drawing outgrows it and otherwise holds still;
     /// New and Open start it afresh.
-    @State private var viewArea: (min: Point2, max: Point2)?
+    @State private var fit = HeldFit()
+
+    /// What the held fit follows: the session and its document.
+    private struct FitKey: Equatable {
+        var session: UUID?
+        var document: ModelDocument?
+    }
 
     init() {
         do {
@@ -68,9 +74,10 @@ struct ContentView: View {
         }
         .background(WindowCloseGuard { confirmDiscard() })
         .onAppear { UnsavedChanges.shared.register(windowID) { confirmDiscard() } }
-        // A new or opened model starts the view afresh; an edit grows it only past what it already shows.
-        .task(id: session?.id) { viewArea = session?.model.viewArea(holding: nil) }
-        .task(id: session?.model.document) { viewArea = session?.model.viewArea(holding: viewArea) }
+        // One path: hold the fit on screen whenever the session or its document changes (`HeldFit`).
+        .task(id: FitKey(session: session?.id, document: session?.model.document)) {
+            if let session { fit.hold(for: session.model, session: session.id) }
+        }
         .onDisappear { UnsavedChanges.shared.remove(windowID) }
     }
 
@@ -127,7 +134,7 @@ struct ContentView: View {
                 Spacer(minLength: 0)
             }
             HStack(spacing: 12) {
-                PlanCanvas(items: model.modelPlan(), bounds: viewArea ?? model.viewArea(holding: nil),
+                PlanCanvas(items: model.modelPlan(), bounds: fit.current(for: model, session: sessionID),
                            pendingStart: pendingStart.flatMap { model.planTransform?.model($0) },
                            selected: Set(roomWalls.map(\.rawValue)),
                            penScale: Double(model.planTransform?.scale.modelUnitsPerPaperUnit ?? 1),

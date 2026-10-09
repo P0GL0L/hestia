@@ -689,6 +689,27 @@ struct HestiaModel {
     }
 }
 
+/// The plan view's fit, held across edits. It belongs to one session: New and Open start a new session, and a
+/// new session starts from its own fit (the blank area, or the opened plan). Within a session the fit only
+/// grows to take in what is drawn outside it. One value holds both the session and the area, so nothing can
+/// grow a fit left over from before New.
+struct HeldFit {
+    private(set) var session: UUID?
+    private(set) var area: (min: Point2, max: Point2)?
+
+    /// The fit to draw `model` with in `session`: the held fit grown to the drawing when the fit is that
+    /// session's, else the session's own starting fit.
+    func current(for model: HestiaModel, session: UUID) -> (min: Point2, max: Point2) {
+        session == self.session ? model.viewArea(holding: area) : model.viewArea(holding: nil)
+    }
+
+    /// Holds the fit now on screen for `session`.
+    mutating func hold(for model: HestiaModel, session: UUID) {
+        area = current(for: model, session: session)
+        self.session = session
+    }
+}
+
 /// The model being edited, with the inverse of every change so far for undo, and the changes undone since the
 /// last edit for redo.
 struct EditSession {
