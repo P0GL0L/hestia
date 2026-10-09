@@ -628,6 +628,25 @@ struct HestiaModel {
         return plan.map { Self.model($0, through: transform) }
     }
 
+    /// Room the plan view leaves around the drawing, in the model.
+    static let viewMargin: Length = .feet(4)
+
+    /// The model area the plan view shows: the area it already shows (`held`), grown only as far as the drawing
+    /// now needs, so the view stays still while drawing inside it. With nothing held it is the drawing with a
+    /// margin, or the blank 60' by 40' area when nothing is drawn yet.
+    func viewArea(holding held: (min: Point2, max: Point2)?) -> (min: Point2, max: Point2) {
+        let blank = (min: Point2(x: .feet(0), y: .feet(0)), max: Point2(x: .feet(60), y: .feet(40)))
+        let margin = Self.viewMargin.ticks
+        let drawn = DisplayList(items: modelPlan()).bounds.map { bounds in
+            (min: Point2(x: Length(ticks: bounds.min.x.ticks - margin), y: Length(ticks: bounds.min.y.ticks - margin)),
+             max: Point2(x: Length(ticks: bounds.max.x.ticks + margin), y: Length(ticks: bounds.max.y.ticks + margin)))
+        }
+        guard let base = held ?? drawn else { return blank }
+        guard let drawn else { return base }
+        return (min: Point2(x: Swift.min(base.min.x, drawn.min.x), y: Swift.min(base.min.y, drawn.min.y)),
+                max: Point2(x: Swift.max(base.max.x, drawn.max.x), y: Swift.max(base.max.y, drawn.max.y)))
+    }
+
     /// One paper-space item in model space. The placement is a uniform scale and a shift with y up on both
     /// sides, so every item inverts: angles are kept and lengths grow by the scale's ratio.
     static func model(_ item: DisplayItem, through transform: ViewTransform) -> DisplayItem {
@@ -667,6 +686,27 @@ struct HestiaModel {
     struct LoadError: LocalizedError {
         var message: String
         var errorDescription: String? { message }
+    }
+}
+
+/// The plan view's fit, held across edits. It belongs to one session: New and Open start a new session, and a
+/// new session starts from its own fit (the blank area, or the opened plan). Within a session the fit only
+/// grows to take in what is drawn outside it. One value holds both the session and the area, so nothing can
+/// grow a fit left over from before New.
+struct HeldFit {
+    private(set) var session: UUID?
+    private(set) var area: (min: Point2, max: Point2)?
+
+    /// The fit to draw `model` with in `session`: the held fit grown to the drawing when the fit is that
+    /// session's, else the session's own starting fit.
+    func current(for model: HestiaModel, session: UUID) -> (min: Point2, max: Point2) {
+        session == self.session ? model.viewArea(holding: area) : model.viewArea(holding: nil)
+    }
+
+    /// Holds the fit now on screen for `session`.
+    mutating func hold(for model: HestiaModel, session: UUID) {
+        area = current(for: model, session: session)
+        self.session = session
     }
 }
 

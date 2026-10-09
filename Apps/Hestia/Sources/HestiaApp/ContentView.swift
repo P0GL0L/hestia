@@ -45,6 +45,15 @@ struct ContentView: View {
     @State private var exportMessage = "Schematic exports land in ~/Hestia-exports"
     /// This window's place in the list Quit asks.
     @State private var windowID = UUID()
+    /// The model area the plan view shows. It grows when the drawing outgrows it and otherwise holds still;
+    /// New and Open start it afresh.
+    @State private var fit = HeldFit()
+
+    /// What the held fit follows: the session and its document.
+    private struct FitKey: Equatable {
+        var session: UUID?
+        var document: ModelDocument?
+    }
 
     init() {
         do {
@@ -65,6 +74,10 @@ struct ContentView: View {
         }
         .background(WindowCloseGuard { confirmDiscard() })
         .onAppear { UnsavedChanges.shared.register(windowID) { confirmDiscard() } }
+        // One path: hold the fit on screen whenever the session or its document changes (`HeldFit`).
+        .task(id: FitKey(session: session?.id, document: session?.model.document)) {
+            if let session { fit.hold(for: session.model, session: session.id) }
+        }
         .onDisappear { UnsavedChanges.shared.remove(windowID) }
     }
 
@@ -121,8 +134,14 @@ struct ContentView: View {
                 Spacer(minLength: 0)
             }
             HStack(spacing: 12) {
-                PlanCanvas(items: model.plan, bounds: model.planBounds, pendingStart: pendingStart,
-                           selected: Set(roomWalls.map(\.rawValue)), onClick: { paper in click(paper) })
+                PlanCanvas(items: model.modelPlan(), bounds: fit.current(for: model, session: sessionID),
+                           pendingStart: pendingStart.flatMap { model.planTransform?.model($0) },
+                           selected: Set(roomWalls.map(\.rawValue)),
+                           penScale: Double(model.planTransform?.scale.modelUnitsPerPaperUnit ?? 1),
+                           onClick: { point in
+                               // The tools work in the plan sheet's paper; take the model point there.
+                               if let paper = model.planTransform?.paper(point) { click(paper) }
+                           })
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.white)
                 OrbitScene(meshes: model.meshes, sessionID: sessionID)

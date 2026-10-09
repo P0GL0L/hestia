@@ -2,15 +2,18 @@ import ATContracts
 import SwiftUI
 
 /// The floor plan as the drawing set draws it: walls with their hatch, door swings, glazing, stairs, floor
-/// openings, and room tags, fitted to the view. Items are in sheet paper space, and `bounds` is the paper the
-/// view fits: the plan's extent, or the blank area of a storey with no walls, outlined so there is somewhere
-/// to click. A click reports the paper point under it; `pendingStart`, a paper point, is marked while a wall
-/// waits for its end, and walls whose IDs are in `selected` are outlined in orange.
+/// openings, and room tags, fitted to the view. Items are in model space, so they stay put when an edit moves
+/// the plan on its sheet, and `bounds` is the model area the view fits, which the caller holds steady while
+/// drawing. With no items, that area is outlined so there is somewhere to click. A click reports the model
+/// point under it; `pendingStart`, a model point, is marked while a wall waits for its end, and walls whose IDs
+/// are in `selected` are outlined in orange. `penScale` is the plan's scale ratio, so pens keep their printed
+/// widths.
 struct PlanCanvas: View {
     var items: [DisplayItem]
     var bounds: (min: Point2, max: Point2)?
     var pendingStart: Point2?
     var selected: Set<UUID> = []
+    var penScale: Double = 1
     var onClick: (Point2) -> Void
 
     var body: some View {
@@ -104,7 +107,7 @@ struct PlanCanvas: View {
     /// The pen's printed width, at the view's scale, never thinner than half a point.
     private func stroke(_ style: DisplayStyle, fit: PlanFit) -> StrokeStyle {
         let pen = Length(ticks: Int64(style.pen.rawValue) * Length.ticksPerMillimeter / 100)
-        let width = max(fit.points(pen), 0.5)
+        let width = max(fit.points(pen) * penScale, 0.5)
         switch style.pattern {
         case .solid: return StrokeStyle(lineWidth: width)
         case .dashed: return StrokeStyle(lineWidth: width, dash: [6, 3])
