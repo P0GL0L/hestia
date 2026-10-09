@@ -25,3 +25,37 @@ jobs:
             exit 0
           fi
           swift test
+
+  macos:
+    name: swift test and app build (macos)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Run tests
+        run: swift test
+
+      - name: Build Hestia.app
+        run: |
+          set -eu
+          app=$(Apps/Hestia/build-app.sh | tail -n 1)
+          test -x "$app/Contents/MacOS/Hestia"
+          file "$app/Contents/MacOS/Hestia"
+          plutil -lint "$app/Contents/Info.plist"
+
+  swiftlint:
+    name: swiftlint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The pinned SwiftLint image. New findings fail; the ones recorded in .swiftlint-baseline.json do not.
+      - name: Lint
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work ghcr.io/realm/swiftlint:0.57.1 \
+            swiftlint lint --strict --baseline .swiftlint-baseline.json
