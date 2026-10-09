@@ -70,16 +70,16 @@ private func lHouseWithViews() throws -> ModelDocument {
     #expect(document.project.displayUnits == nil)
     let before = try SchematicDrawingSet().sheets(for: document, geometry: HestiaGeometryEngine())
     let plan = try #require(before.first { $0.number == "A-101" })
-    // No stored overrides on the cottage plan: the printer measures in the scale's units.
-    #expect(dimensionTexts(plan).allSatisfy { $0 == nil })
+    // No units stored: every dimension carries its model length in the scale's units, here feet and inches.
+    let inferred = dimensionTexts(plan)
+    #expect(!inferred.isEmpty)
+    #expect(inferred.allSatisfy { $0?.contains("\"") == true })
     #expect(DrawingUnits.style(document) == .feetInchesFractions)
-    // Setting the units to what the scale implies prints the same lengths, now carried on each dimension.
+    // Setting the units to what the scale implies prints exactly the same text.
     _ = try SetProjectUnitsCommand(projectID: document.project.id, units: .feetInchesFractions).apply(to: &document)
     let after = try SchematicDrawingSet().sheets(for: document, geometry: HestiaGeometryEngine())
     let set = try #require(after.first { $0.number == "A-101" })
-    let printed = dimensionTexts(set).compactMap { $0 }
-    #expect(printed.count == dimensionTexts(plan).count)
-    #expect(printed.allSatisfy { $0.contains("\"") })
+    #expect(dimensionTexts(set) == inferred)
 }
 
 @Test func storedOverridesStillWin() throws {

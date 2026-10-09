@@ -24,8 +24,9 @@ private func overrides(_ items: [DisplayItem]) -> [String] {
     let livingTexts = items.filter { $0.elementID == living }.map { item -> String? in
         if case let .dimension(_, _, _, text) = item.primitive { return text }; return nil
     }
-    #expect(livingTexts == ["14'-0\" CLR", nil])
-    #expect(overrides(items) == ["14'-0\" CLR"])
+    // The override prints on its own face; the other face prints its model length.
+    #expect(livingTexts == ["14'-0\" CLR", "12'-0\""])
+    #expect(overrides(items).filter { $0.hasSuffix("CLR") } == ["14'-0\" CLR"])
 }
 
 @Test func wallOverridesPrintOnlyOnASegmentThatIsExactlyThatWall() throws {
@@ -39,7 +40,11 @@ private func overrides(_ items: [DisplayItem]) -> [String] {
     // The west wall spans the whole west face too, but its override is for the west face only.
     _ = try document.perform(SetDimensionOverrideCommand(elementID: westWall, face: .south, text: "WRONG FACE").erased)
     let items = DimensionChains.items(document: document, storey: document.storeys[0].id, view: view)
-    #expect(overrides(items) == ["38'-0\" VIF"])
+    let texts = overrides(items)
+    #expect(texts.filter { $0 == "38'-0\" VIF" }.count == 1)
+    #expect(!texts.contains("38'-0\""))
+    #expect(!texts.contains("NOT PRINTED"))
+    #expect(!texts.contains("WRONG FACE"))
     let segment = try #require(items.first {
         if case .dimension(_, _, _, "38'-0\" VIF") = $0.primitive { return true }; return false
     })
@@ -52,7 +57,7 @@ private func overrides(_ items: [DisplayItem]) -> [String] {
     let frontDoor = document.openings[0].id.rawValue
     _ = try document.perform(SetDimensionOverrideCommand(elementID: frontDoor, face: .width, text: "3'-0\" RO").erased)
     let chains = DimensionChains.items(document: document, storey: document.storeys[0].id, view: view)
-    #expect(overrides(chains).isEmpty)
+    #expect(!overrides(chains).contains { $0.contains("RO") })
     let doors = try #require(ScheduleView.table(.doors, document: document, style: .feetInchesFractions, areas: [:]))
     #expect(doors.rows[0][2] == "3'-0\" RO")
     #expect(doors.rows[1][2] == "3'-0\"")
@@ -64,5 +69,9 @@ private func overrides(_ items: [DisplayItem]) -> [String] {
     _ = try document.perform(SetDimensionOverrideCommand(elementID: living, face: .depth, text: "VERIFY").erased)
     _ = try document.perform(ClearDimensionOverrideCommand(elementID: living, face: .depth).erased)
     let items = DimensionChains.interiorItems(document: document, storey: document.storeys[0].id, view: view)
-    #expect(overrides(items).isEmpty)
+    let livingDepth = items.filter { $0.elementID == living }.compactMap { item -> String? in
+        if case let .dimension(_, _, _, text) = item.primitive { return text }; return nil
+    }
+    #expect(livingDepth == ["14'-0\"", "12'-0\""])
+    #expect(!overrides(items).contains("VERIFY"))
 }
