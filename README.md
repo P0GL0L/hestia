@@ -12,7 +12,9 @@ Former codename: ArchI-Tect. The product name is Hestia.
 
 This repository is the system of record for contribution, monitoring, and completion.
 
-Swift modules have not started. Stream 0 is the only stream that may begin. Every other stream waits for the `contracts-v1.0` tag.
+The six Swift modules and the macOS app are built, and the [alpha bar](docs/ALPHA.md) is met: a new user can draw a six-room cottage with doors, windows, rooms, a hip roof, and a straight stair, orbit it in 3D, and export a schematic PDF and DXF. Work proceeds one reviewed slice at a time toward the full set of stream briefs. The `contracts-v1.0` tag that closes Stream 0 is not cut yet; [docs/WORKSTREAMS.md](docs/WORKSTREAMS.md) lists what remains.
+
+- Alpha bar and merge authority: [docs/ALPHA.md](docs/ALPHA.md)
 
 - Work board: [issues](https://github.com/P0GL0L/hestia/issues)
 - Assignments and done criteria: [docs/WORKSTREAMS.md](docs/WORKSTREAMS.md)
@@ -23,8 +25,8 @@ Swift modules have not started. Stream 0 is the only stream that may begin. Ever
 
 | Role | Party | Streams |
 | --- | --- | --- |
-| Owner. Approves contract changes, UI direction, name, and releases. | P0GL0L | — |
-| Project manager. Dispatches, tracks, runs checkpoints. Does not merge or approve contracts. | Jarvis | Coordination |
+| Owner. Approves contract changes, the name, and releases. Ordinary UI slices need no approval; Charles is required only for real-money spend or a 2FA or login block (`docs/ALPHA.md`). | P0GL0L | — |
+| Project manager. Specifies and dispatches slices, tracks, runs checkpoints, and merges verified green slices. Does not approve contract changes. | Jarvis | Coordination |
 | Architect and integrator. | Claude | 0 Contracts, D Drawings, F tool design |
 | Core geometry. | Claude Code | A Geometry |
 | Mac UI. | Cursor | B App shell and 2D, C 3D viewport |
