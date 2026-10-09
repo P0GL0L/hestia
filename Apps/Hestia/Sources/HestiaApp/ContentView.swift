@@ -43,6 +43,8 @@ struct ContentView: View {
     @State private var roomName = "Room"
     @State private var status = Tool.wall.hint
     @State private var exportMessage = "Schematic exports land in ~/Hestia-exports"
+    /// This window's place in the list Quit asks.
+    @State private var windowID = UUID()
 
     init() {
         do {
@@ -53,12 +55,17 @@ struct ContentView: View {
     }
 
     var body: some View {
-        if let session {
-            editor(session.model, sessionID: session.id)
-        } else {
-            Text(loadError ?? "No model loaded.")
-                .padding()
+        Group {
+            if let session {
+                editor(session.model, sessionID: session.id)
+            } else {
+                Text(loadError ?? "No model loaded.")
+                    .padding()
+            }
         }
+        .background(WindowCloseGuard { confirmDiscard() })
+        .onAppear { UnsavedChanges.shared.register(windowID) { confirmDiscard() } }
+        .onDisappear { UnsavedChanges.shared.remove(windowID) }
     }
 
     private func editor(_ model: HestiaModel, sessionID: UUID) -> some View {
@@ -76,7 +83,7 @@ struct ContentView: View {
                 HStack(spacing: 6) {
                     Button("New") { newModel() }
                     Button("Open…") { openModel() }
-                    Button("Save…") { saveModel(model) }
+                    Button("Save…") { saveModel() }
                     Button("Undo") { undo() }
                         .keyboardShortcut("z", modifiers: .command)
                         .disabled(!(session?.canUndo ?? false))
@@ -345,6 +352,7 @@ struct ContentView: View {
     /// Replaces the model with an empty one: one building, one ground storey, no walls. Nothing before it can
     /// be undone.
     private func newModel() {
+        guard confirmDiscard() else { return }
         pendingStart = nil
         do {
             session = EditSession(model: try HestiaModel.blank())
@@ -358,6 +366,7 @@ struct ContentView: View {
 
     /// Replaces the model with one read from a saved file. Nothing before it can be undone.
     private func openModel() {
+        guard confirmDiscard() else { return }
         let panel = NSOpenPanel()
         panel.allowedFileTypes = ["json"]
         panel.canChooseFiles = true
@@ -374,17 +383,44 @@ struct ContentView: View {
         }
     }
 
-    /// Writes the model's JSON where the person chooses. The undo history is not saved.
-    private func saveModel(_ model: HestiaModel) {
+    /// Writes the model's JSON where the person chooses. The undo history is not saved. Returns whether it was
+    /// written; a cancelled panel or a failed write leaves the document unsaved.
+    @discardableResult
+    private func saveModel() -> Bool {
+        guard let model = session?.model else { return false }
         let panel = NSSavePanel()
         panel.allowedFileTypes = ["json"]
         panel.nameFieldStringValue = fileName(model, ".json")
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard panel.runModal() == .OK, let url = panel.url else { return false }
         do {
             try model.saveData().write(to: url, options: .atomic)
+            session?.markSaved()
             status = "Saved \(url.lastPathComponent)."
+            return true
         } catch {
             status = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Asks before the document is replaced or its window closes, when it differs from the last New, Open, or
+    /// successful Save. Save writes it through the save panel, and a cancelled panel stays; Don't Save goes
+    /// ahead; Cancel stays. A document with no changes does not ask. Returns whether to go ahead.
+    private func confirmDiscard() -> Bool {
+        guard let current = session, current.hasUnsavedChanges else { return true }
+        let alert = NSAlert()
+        alert.messageText = "Do you want to save the changes to \u{201C}\(current.model.document.project.name)\u{201D}?"
+        alert.informativeText = "Your changes will be lost if you don't save them."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Don't Save")
+        alert.addButton(withTitle: "Cancel")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            return saveModel()
+        case .alertSecondButtonReturn:
+            return true
+        default:
+            return false
         }
     }
 
