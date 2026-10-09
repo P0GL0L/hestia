@@ -652,13 +652,25 @@ struct EditSession {
     /// Which session this is. Edits and undo keep it; New and Open start a session with a new one, so a view
     /// can tell a changed model from an edited one.
     let id = UUID()
+    /// The document as it was at the last New, Open, or successful Save.
+    private(set) var savedDocument: ModelDocument
 
     init(model: HestiaModel) {
         self.model = model
+        savedDocument = model.document
     }
 
     var canUndo: Bool { !undoStack.isEmpty }
     var canRedo: Bool { !redoStack.isEmpty }
+
+    /// Whether the document differs from the last New, Open, or successful Save. Undoing back to that document
+    /// counts as no change.
+    var hasUnsavedChanges: Bool { model.document != savedDocument }
+
+    /// Records the document as it stands as saved.
+    mutating func markSaved() {
+        savedDocument = model.document
+    }
 
     /// Adds a wall between two points of the plan sheet's paper, taken back into the model.
     /// Each end is snapped to the project's grid, so a clicked wall measures in whole inches (or 10 mm).
