@@ -150,6 +150,26 @@ struct HestiaModel {
         return Length(ticks: shifted / step.ticks * step.ticks)
     }
 
+    /// How close, on the plan sheet's paper, a new wall end must land to an existing wall end to join it.
+    static let endSnapReach: Length = .millimeters(3)
+
+    /// Where a clicked wall end lands: on the grid, then on an existing ground-storey wall end when the grid
+    /// point is within `endSnapReach` of it on paper, so walls drawn by hand meet exactly. The direction is
+    /// never squared to an axis.
+    func snappedWallEnd(_ point: Point2) -> Point2 {
+        let grid = snapped(point)
+        guard let storey = groundStorey, let scale = planTransform?.scale else { return grid }
+        let reach = Double(Self.endSnapReach.ticks * scale.modelUnitsPerPaperUnit)
+        func distance(_ end: Point2) -> Double {
+            hypot(Double(end.x.ticks - grid.x.ticks), Double(end.y.ticks - grid.y.ticks))
+        }
+        let ends = document.walls.filter { $0.storeyID == storey }.flatMap { [$0.start, $0.end] }
+        guard let nearest = ends.min(by: { distance($0) < distance($1) }), distance(nearest) <= reach else {
+            return grid
+        }
+        return nearest
+    }
+
     /// A straight wall on the ground storey from one model point to another, with a new ID, as thick and as
     /// tall as an exterior wall on that storey (one with layers, else the thickest). On a storey with no walls
     /// it takes the default exterior size.
@@ -681,12 +701,13 @@ struct EditSession {
     }
 
     /// Adds a wall between two points of the plan sheet's paper, taken back into the model.
-    /// Each end is snapped to the project's grid, so a clicked wall measures in whole inches (or 10 mm).
+    /// Each end is snapped to the project's grid, so a clicked wall measures in whole inches (or 10 mm), and then
+    /// to an existing wall end within 3 mm on paper (`HestiaModel.snappedWallEnd`).
     mutating func addWall(fromPaper start: Point2, toPaper end: Point2) throws {
         guard let a = model.modelPoint(paper: start), let b = model.modelPoint(paper: end) else {
             throw HestiaModel.LoadError(message: "The plan has no placement to draw on.")
         }
-        let from = model.snapped(a), to = model.snapped(b)
+        let from = model.snappedWallEnd(a), to = model.snappedWallEnd(b)
         guard from != to else {
             throw HestiaModel.LoadError(message: "Both ends snap to the same point. Click farther apart.")
         }
