@@ -10,8 +10,11 @@ enum DimensionChains {
     /// Paper room the chains need outside the plan.
     static let reserve = mmTicks(34)
 
-    static func items(document: ModelDocument, storey: StoreyID, view: ViewTransform) -> [DisplayItem] {
+    /// `units` writes each length; nil infers them from the view's scale (`DrawingUnits.style`).
+    static func items(document: ModelDocument, storey: StoreyID, view: ViewTransform,
+                      units: LengthFormatStyle? = nil) -> [DisplayItem] {
         guard let extent = FloorPlanView.extent(of: document, storey: storey) else { return [] }
+        let units = units ?? DrawingUnits.style(document, scale: view.scale)
         let walls = document.walls.filter { $0.storeyID == storey }
         let openings = document.openings
         var items: [DisplayItem] = []
@@ -26,11 +29,11 @@ enum DimensionChains {
         let westLabels = wallLabels(document: document, walls: walls, alongX: false, face: .west)
         for (tier, chain) in [south.openings, south.walls, south.overall].enumerated() where chain.count > 2 || tier == 2 {
             items += chainItems(chain, alongX: true, face: extent.min.y.ticks, offset: tierOffsets[tier], view: view,
-                                labels: southLabels, document: document)
+                                labels: southLabels, document: document, units: units)
         }
         for (tier, chain) in [west.openings, west.walls, west.overall].enumerated() where chain.count > 2 || tier == 2 {
             items += chainItems(chain, alongX: false, face: extent.min.x.ticks, offset: tierOffsets[tier], view: view,
-                                labels: westLabels, document: document)
+                                labels: westLabels, document: document, units: units)
         }
         return items
     }
@@ -93,14 +96,15 @@ enum DimensionChains {
 
     private static func chainItems(
         _ stops: [Int64], alongX: Bool, face: Int64, offset: Int64, view: ViewTransform, labels: [Span: String],
-        document: ModelDocument
+        document: ModelDocument, units: LengthFormatStyle
     ) -> [DisplayItem] {
         zip(stops, stops.dropFirst()).map { a, b in
             let from = view.paper(alongX ? paperPoint(a, face) : paperPoint(face, a))
             let to = view.paper(alongX ? paperPoint(b, face) : paperPoint(face, b))
             // Left of a rightward chain is inside the building, so the south chain uses a negative offset;
             // left of an upward chain is outside, so the west chain uses a positive one.
-            let text = DrawingUnits.dimensionText(document, length: Length(ticks: b - a), override: labels[Span(a, b)])
+            let text = DrawingUnits.dimensionText(document, length: Length(ticks: b - a), override: labels[Span(a, b)],
+                                                  units: units)
             return DisplayItem(.dimension(from: from, to: to, offset: Length(ticks: alongX ? -offset : offset),
                                           override: text), style: style)
         }
@@ -108,7 +112,9 @@ enum DimensionChains {
 
     /// Clear interior width and depth of every box-shaped room, face to face, a quarter of the way in from
     /// its south and west walls so they clear the room tag. Rooms that are not boxes get none.
-    static func interiorItems(document: ModelDocument, storey: StoreyID, view: ViewTransform) -> [DisplayItem] {
+    static func interiorItems(document: ModelDocument, storey: StoreyID, view: ViewTransform,
+                              units: LengthFormatStyle? = nil) -> [DisplayItem] {
+        let units = units ?? DrawingUnits.style(document, scale: view.scale)
         let walls = Dictionary(uniqueKeysWithValues: document.walls.map { ($0.id, $0) })
         var items: [DisplayItem] = []
         for room in document.rooms where room.storeyID == storey {
@@ -121,13 +127,15 @@ enum DimensionChains {
                                                 offset: Length(ticks: 0),
                                                 override: DrawingUnits.dimensionText(
                                                     document, length: Length(ticks: x1 - x0),
-                                                    override: document.dimensionOverride(for: id, face: .width))),
+                                                    override: document.dimensionOverride(for: id, face: .width),
+                                                    units: units)),
                                      style: style, elementID: room.id.rawValue))
             items.append(DisplayItem(.dimension(from: view.paper(paperPoint(x, y0)), to: view.paper(paperPoint(x, y1)),
                                                 offset: Length(ticks: 0),
                                                 override: DrawingUnits.dimensionText(
                                                     document, length: Length(ticks: y1 - y0),
-                                                    override: document.dimensionOverride(for: id, face: .depth))),
+                                                    override: document.dimensionOverride(for: id, face: .depth),
+                                                    units: units)),
                                      style: style, elementID: room.id.rawValue))
         }
         return items

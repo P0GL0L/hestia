@@ -159,8 +159,10 @@ public struct SchematicDrawingSet: DrawingGenerator {
                                    placed.transform.paperOrigin.y.ticks - reserve - mmTicks(8))
             return FloorPlanView.items(document: document, storey: storeyID, outlines: outlines, areas: areas,
                                        view: placed.transform, stairsBelow: stairsBelow)
-                + DimensionChains.items(document: document, storey: storeyID, view: placed.transform)
-                + DimensionChains.interiorItems(document: document, storey: storeyID, view: placed.transform)
+                + DimensionChains.items(document: document, storey: storeyID, view: placed.transform,
+                                        units: dimensionUnits(document, sheet: sheet))
+                + DimensionChains.interiorItems(document: document, storey: storeyID, view: placed.transform,
+                                                units: dimensionUnits(document, sheet: sheet))
                 + SheetFrame.viewTitle("\(storeyName) Plan", scale: scale, at: placed.fits ? under : titleAt)
         case let .elevation(direction):
             let name = Self.name(of: view)
@@ -265,6 +267,18 @@ public struct SchematicDrawingSet: DrawingGenerator {
     func units(_ document: ModelDocument) -> LengthFormatStyle {
         if let units = document.project.displayUnits { return units }
         return sheetsToDraw(document).contains { DrawingUnits.isImperial($0.scale) } ? .feetInchesFractions : .metric
+    }
+
+    /// Units for a plan's dimensions: the project's own; else those the sheet's scale implies (an inch mark
+    /// means feet and inches, otherwise millimetres); else, on a sheet with no scale, those the set's other
+    /// sheets imply; else, when no sheet has a scale, feet and inches on inch paper and millimetres on ISO.
+    /// A sheet with no scale is drawn at a fitted one, and its dimensions never take their units from that.
+    func dimensionUnits(_ document: ModelDocument, sheet: Sheet) -> LengthFormatStyle {
+        if let units = document.project.displayUnits { return units }
+        if let scale = sheet.scale { return DrawingUnits.isImperial(scale) ? .feetInchesFractions : .metric }
+        let scales = sheetsToDraw(document).compactMap(\.scale)
+        if !scales.isEmpty { return scales.contains(where: DrawingUnits.isImperial) ? .feetInchesFractions : .metric }
+        return DrawingUnits.isInchPaper(sheet.paper) ? .feetInchesFractions : .metric
     }
 
     static func name(of view: SheetView) -> String {

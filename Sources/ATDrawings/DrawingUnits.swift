@@ -29,11 +29,15 @@ enum DrawingUnits {
         return LengthFormatting.format(rounded, style: style)
     }
 
-    /// The text a dimension should carry: an override if one is stored, else the measured length in the
-    /// project's units when it sets them. Nil leaves the printer to measure in the scale's units, as before.
-    static func dimensionText(_ document: ModelDocument, length: Length, override: String?) -> String? {
-        if let override { return override }
-        guard let units = document.project.displayUnits else { return nil }
-        return label(length, style: units)
+    /// Whether a sheet size is an inch paper (ANSI or ARCH) rather than an ISO one.
+    static func isInchPaper(_ paper: PaperSize) -> Bool {
+        paper.name.hasPrefix("ANSI") || paper.name.hasPrefix("ARCH")
+    }
+
+    /// The text a dimension carries: an override if one is stored, else the model length in `units`. It is
+    /// written from the model, never measured off the paper.
+    static func dimensionText(_ document: ModelDocument, length: Length, override: String?,
+                              units: LengthFormatStyle) -> String {
+        override ?? label(length, style: units)
     }
 }
