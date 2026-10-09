@@ -727,10 +727,13 @@ struct EditSession {
     let id = UUID()
     /// The document as it was at the last New, Open, or successful Save.
     private(set) var savedDocument: ModelDocument
+    /// The file from the last successful Open or Save. Command-S writes there. New starts with none.
+    private(set) var fileURL: URL?
 
-    init(model: HestiaModel) {
+    init(model: HestiaModel, fileURL: URL? = nil) {
         self.model = model
         savedDocument = model.document
+        self.fileURL = fileURL
     }
 
     var canUndo: Bool { !undoStack.isEmpty }
@@ -743,6 +746,14 @@ struct EditSession {
     /// Records the document as it stands as saved.
     mutating func markSaved() {
         savedDocument = model.document
+    }
+
+    /// Writes the document to `url`, atomically, and remembers that file. A failed write throws and leaves the
+    /// document unsaved and the remembered file as it was.
+    mutating func save(to url: URL) throws {
+        try model.saveData().write(to: url, options: .atomic)
+        markSaved()
+        fileURL = url
     }
 
     /// Adds a wall between two points of the plan sheet's paper, taken back into the model.
