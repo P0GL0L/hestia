@@ -8,6 +8,10 @@ enum FloorPlanView {
     static let hatchStyle = DisplayStyle(layer: "A-WALL-PATT", pen: .extraFine)
     static let doorStyle = DisplayStyle(layer: "A-DOOR", pen: .thin)
     static let glazingStyle = DisplayStyle(layer: "A-GLAZ", pen: .thin)
+    /// A window wholly above the plan cut is seen beyond it, so it is drawn dashed.
+    static let glazingAboveStyle = DisplayStyle(layer: "A-GLAZ", pen: .thin, pattern: .dashed)
+    /// The height the plan is cut at: 4'-0" above the floor, the geometry engine's plan cut.
+    static let planCut: Length = .inches(48)
     static let roomStyle = DisplayStyle(layer: "A-AREA-IDEN", pen: .fine)
     static let stairStyle = DisplayStyle(layer: "A-FLOR-STRS", pen: .thin)
     static let floorOpeningStyle = DisplayStyle(layer: "A-FLOR-OPNG", pen: .thin, pattern: .dashed)
@@ -106,6 +110,11 @@ enum FloorPlanView {
         return String(format: "%.1f SQ M", squareMillimeters / 1_000_000)
     }
 
+    /// Whether an opening is wholly above the plan cut: its sill at or above the cut and its head above it.
+    static func isAboveCut(_ opening: Opening) -> Bool {
+        opening.sillHeight.ticks >= planCut.ticks && opening.sillHeight.ticks + opening.height.ticks > planCut.ticks
+    }
+
     /// Where a pocket door's leaf sits, along the wall from its start: beside the opening toward the wall start,
     /// as long as the opening is wide; toward the wall end when that run would pass the wall start; nil when
     /// neither side of the wall has room, so the leaf is never drawn past a wall end.
@@ -118,7 +127,8 @@ enum FloorPlanView {
 
     /// Jambs across the wall, then a swing and leaf for hinged doors, the leaf in its pocket for a pocket door
     /// (a rectangle inside the wall, a quarter of its thickness in from each face), a slide line for other doors,
-    /// and glazing lines for windows. A cased opening is its two jambs only.
+    /// and glazing lines for windows, dashed for a window wholly above the plan cut. A cased opening is its two
+    /// jambs only.
     static func symbol(for opening: Opening, in wall: Wall, view: ViewTransform) -> [DisplayItem] {
         let sx = Double(wall.start.x.ticks), sy = Double(wall.start.y.ticks)
         let dx = Double(wall.end.x.ticks) - sx, dy = Double(wall.end.y.ticks) - sy
@@ -134,7 +144,7 @@ enum FloorPlanView {
                                   Int64((sy + uy * along + ny * across).rounded())))
         }
         let id = opening.id.rawValue
-        let style = opening.kind.isWindow ? glazingStyle : doorStyle
+        let style = opening.kind.isWindow ? (isAboveCut(opening) ? glazingAboveStyle : glazingStyle) : doorStyle
         var items = [
             DisplayItem(.line(start: at(a, -half), end: at(a, half)), style: style, elementID: id),
             DisplayItem(.line(start: at(b, -half), end: at(b, half)), style: style, elementID: id),
