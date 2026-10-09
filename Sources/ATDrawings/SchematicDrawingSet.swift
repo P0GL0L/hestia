@@ -121,8 +121,21 @@ public struct SchematicDrawingSet: DrawingGenerator {
         let reserve = DimensionChains.reserve
         let inner = PaperRect(minX: slot.minX + reserve, minY: slot.minY + reserve,
                               width: slot.width - reserve, height: slot.height - reserve)
-        let scale = sheet.scale ?? fittingScale(extent: extent, in: inner)
-        return ViewTransform.centering(modelMin: extent.min, modelMax: extent.max, in: inner, scale: scale)
+        return place(extent: extent, in: inner, sheetScale: sheet.scale)
+    }
+
+    /// A view centred in its area at the sheet's scale; or, when it does not fit there at that scale, at the
+    /// largest standard scale that does, so it never runs over the title block or off the page. The view's title
+    /// prints the scale it is drawn at. With no sheet scale it is the fitting scale.
+    static func place(extent: (min: Point2, max: Point2), in area: PaperRect, sheetScale: DrawingScale?)
+        -> (transform: ViewTransform, fits: Bool) {
+        if let sheetScale {
+            let placed = ViewTransform.centering(modelMin: extent.min, modelMax: extent.max, in: area,
+                                                 scale: sheetScale)
+            if placed.fits { return placed }
+        }
+        let scale = fittingScale(extent: extent, in: area)
+        return ViewTransform.centering(modelMin: extent.min, modelMax: extent.max, in: area, scale: scale)
     }
 
     /// Stacks views top to bottom in equal bands, leaving room under each for its title.
@@ -174,8 +187,8 @@ public struct SchematicDrawingSet: DrawingGenerator {
             guard let extent = ElevationView.extent(document, direction, roofMeshes: roofMeshes) else {
                 return SheetFrame.notGenerated(name, in: slot)
             }
-            let scale = sheet.scale ?? Self.fittingScale(extent: extent, in: slot)
-            let placed = ViewTransform.centering(modelMin: extent.min, modelMax: extent.max, in: slot, scale: scale)
+            let placed = Self.place(extent: extent, in: slot, sheetScale: sheet.scale)
+            let scale = placed.transform.scale
             let under = paperPoint(placed.transform.paperOrigin.x.ticks,
                                    placed.transform.paperOrigin.y.ticks - mmTicks(10))
             return ElevationView.items(document, direction, view: placed.transform, roofMeshes: roofMeshes,
@@ -199,8 +212,8 @@ public struct SchematicDrawingSet: DrawingGenerator {
             guard let extent = RoofPlanView.extent(document) else {
                 return SheetFrame.notGenerated("Roof plan has no roof", in: slot)
             }
-            let scale = sheet.scale ?? Self.fittingScale(extent: extent, in: slot)
-            let placed = ViewTransform.centering(modelMin: extent.min, modelMax: extent.max, in: slot, scale: scale)
+            let placed = Self.place(extent: extent, in: slot, sheetScale: sheet.scale)
+            let scale = placed.transform.scale
             let under = paperPoint(placed.transform.paperOrigin.x.ticks,
                                    placed.transform.paperOrigin.y.ticks - mmTicks(12))
             let roofIDs = Set(document.roofs.map(\.id.rawValue))
@@ -213,8 +226,8 @@ public struct SchematicDrawingSet: DrawingGenerator {
             guard let extent = SitePlanView.extent(document) else {
                 return SheetFrame.notGenerated("Site plan has no building or terrain", in: slot)
             }
-            let scale = sheet.scale ?? Self.fittingScale(extent: extent, in: slot)
-            let placed = ViewTransform.centering(modelMin: extent.min, modelMax: extent.max, in: slot, scale: scale)
+            let placed = Self.place(extent: extent, in: slot, sheetScale: sheet.scale)
+            let scale = placed.transform.scale
             return SitePlanView.items(document, view: placed.transform, area: slot)
                 + SheetFrame.viewTitle("Site Plan", scale: scale, at: titleAt)
         case let .section(line):
@@ -222,8 +235,8 @@ public struct SchematicDrawingSet: DrawingGenerator {
             guard let extent = SectionView.extent(outlines) else {
                 return SheetFrame.notGenerated("Section line crosses nothing", in: slot)
             }
-            let scale = sheet.scale ?? Self.fittingScale(extent: extent, in: slot)
-            let placed = ViewTransform.centering(modelMin: extent.min, modelMax: extent.max, in: slot, scale: scale)
+            let placed = Self.place(extent: extent, in: slot, sheetScale: sheet.scale)
+            let scale = placed.transform.scale
             let under = paperPoint(placed.transform.paperOrigin.x.ticks,
                                    placed.transform.paperOrigin.y.ticks - mmTicks(10))
             return SectionView.items(outlines, view: placed.transform)
@@ -239,8 +252,8 @@ public struct SchematicDrawingSet: DrawingGenerator {
             let legendWidth = mmTicks(80)
             let planArea = PaperRect(minX: slot.minX, minY: slot.minY, width: slot.width - legendWidth,
                                      height: slot.height)
-            let scale = sheet.scale ?? Self.fittingScale(extent: extent, in: planArea)
-            let placed = ViewTransform.centering(modelMin: extent.min, modelMax: extent.max, in: planArea, scale: scale)
+            let placed = Self.place(extent: extent, in: planArea, sheetScale: sheet.scale)
+            let scale = placed.transform.scale
             let outlines = try geometry.planView(of: document, storey: storeyID)
             let under = paperPoint(placed.transform.paperOrigin.x.ticks,
                                    placed.transform.paperOrigin.y.ticks - mmTicks(12))
