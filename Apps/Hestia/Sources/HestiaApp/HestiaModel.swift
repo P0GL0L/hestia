@@ -211,10 +211,13 @@ struct HestiaModel {
         return AddRoomCommand(roomID: id, storeyID: storey, name: name, boundaryWallIDs: walls)
     }
 
-    /// An error as a status line: its own description when it has one, else the refusal it names.
+    /// An error as a status line: a command's or a file's refusal as a plain sentence (`Refusals`), else the
+    /// error's own description.
     static func describe(_ error: Error) -> String {
+        if let error = error as? CommandValidationError { return Refusals.sentence(for: error) }
+        if let error = error as? ModelDocumentError { return Refusals.sentence(for: error) }
         if let described = (error as? LocalizedError)?.errorDescription { return described }
-        return "Refused: \(error)"
+        return error.localizedDescription
     }
 
     /// A hip roof over the ground storey's wall line, as on the cottage: 6" in 12 on every edge, a 1'-0"
@@ -585,8 +588,10 @@ struct HestiaModel {
         let document: ModelDocument
         do {
             document = try ModelDocument.decode(from: data)
+        } catch let error as ModelDocumentError {
+            throw LoadError(message: Refusals.sentence(for: error))
         } catch {
-            throw LoadError(message: "That file is not a Hestia model: \(error.localizedDescription)")
+            throw LoadError(message: "That file is not a Hestia model, or it is damaged.")
         }
         // A file written by hand, merged, or damaged can break what the commands guarantee, and the geometry and
         // drawings rely on it, so it is refused before anything is drawn from it.
