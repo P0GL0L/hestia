@@ -80,6 +80,9 @@ struct ContentView: View {
                     Button("Undo") { undo() }
                         .keyboardShortcut("z", modifiers: .command)
                         .disabled(!(session?.canUndo ?? false))
+                    Button("Redo") { redo() }
+                        .keyboardShortcut("z", modifiers: [.command, .shift])
+                        .disabled(!(session?.canRedo ?? false))
                 }
                 .fixedSize()
                 Spacer(minLength: 12)
@@ -395,6 +398,21 @@ struct ContentView: View {
             let walls = Set(current.model.document.walls.map(\.id))
             roomWalls = roomWalls.filter { walls.contains($0) }
             status = "Undone."
+        } catch {
+            status = error.localizedDescription
+        }
+    }
+
+    private func redo() {
+        guard var current = session else { return }
+        pendingStart = nil
+        do {
+            try current.redo()
+            session = current
+            // A redone removal takes a wall out of the room's boundary too.
+            let walls = Set(current.model.document.walls.map(\.id))
+            roomWalls = roomWalls.filter { walls.contains($0) }
+            status = "Redone."
         } catch {
             status = error.localizedDescription
         }
