@@ -642,10 +642,13 @@ struct HestiaModel {
     }
 }
 
-/// The model being edited, with the inverse of every change so far for undo.
+/// The model being edited, with the inverse of every change so far for undo, and the changes undone since the
+/// last edit for redo.
 struct EditSession {
     private(set) var model: HestiaModel
     private(set) var undoStack: [AnyCommand] = []
+    /// The commands that redo what was undone, the most recently undone last. A new edit clears it.
+    private(set) var redoStack: [AnyCommand] = []
     /// Which session this is. Edits and undo keep it; New and Open start a session with a new one, so a view
     /// can tell a changed model from an edited one.
     let id = UUID()
@@ -655,6 +658,7 @@ struct EditSession {
     }
 
     var canUndo: Bool { !undoStack.isEmpty }
+    var canRedo: Bool { !redoStack.isEmpty }
 
     /// Adds a wall between two points of the plan sheet's paper, taken back into the model.
     /// Each end is snapped to the project's grid, so a clicked wall measures in whole inches (or 10 mm).
@@ -803,20 +807,32 @@ struct EditSession {
         try perform(RemoveRoofCommand(roofID: id).erased)
     }
 
-    /// Applies a command, keeping its inverse.
+    /// Applies a command, keeping its inverse. A new edit clears what could be redone.
     mutating func perform(_ command: AnyCommand) throws {
         var document = model.document
         let inverse = try document.perform(command)
         model = try HestiaModel(document: document, issueDate: model.issueDate)
         undoStack.append(inverse)
+        redoStack.removeAll()
     }
 
-    /// Applies the inverse of the last change.
+    /// Applies the inverse of the last change, keeping the command that puts it back for redo.
     mutating func undo() throws {
         guard let inverse = undoStack.last else { return }
         var document = model.document
-        _ = try document.perform(inverse)
+        let redo = try document.perform(inverse)
         model = try HestiaModel(document: document, issueDate: model.issueDate)
         undoStack.removeLast()
+        redoStack.append(redo)
+    }
+
+    /// Applies again the change last undone, keeping its inverse for undo.
+    mutating func redo() throws {
+        guard let command = redoStack.last else { return }
+        var document = model.document
+        let inverse = try document.perform(command)
+        model = try HestiaModel(document: document, issueDate: model.issueDate)
+        redoStack.removeLast()
+        undoStack.append(inverse)
     }
 }
