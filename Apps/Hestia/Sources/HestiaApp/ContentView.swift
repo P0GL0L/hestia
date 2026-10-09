@@ -492,13 +492,28 @@ struct ContentView: View {
         }
     }
 
+    /// `name` in `directory`, or, when a file of that name is already there, the name with the lowest free
+    /// number before its extension ("rect-cottage-schematic-set 2.pdf", then 3), so an export never replaces
+    /// an earlier one.
+    static func unusedURL(for name: String, in directory: URL) -> URL {
+        let first = directory.appendingPathComponent(name)
+        guard FileManager.default.fileExists(atPath: first.path) else { return first }
+        let stem = (name as NSString).deletingPathExtension, ext = (name as NSString).pathExtension
+        var number = 2
+        while true {
+            let candidate = directory.appendingPathComponent("\(stem) \(number)" + (ext.isEmpty ? "" : ".\(ext)"))
+            if !FileManager.default.fileExists(atPath: candidate.path) { return candidate }
+            number += 1
+        }
+    }
+
     private func writeExport(name: String, body: () throws -> Data) {
         do {
             let directory = FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent("Hestia-exports", isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let url = directory.appendingPathComponent(name)
-            try body().write(to: url)
+            let url = Self.unusedURL(for: name, in: directory)
+            try body().write(to: url, options: .atomic)
             exportMessage = url.path
         } catch {
             exportMessage = error.localizedDescription
