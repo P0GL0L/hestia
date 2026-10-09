@@ -559,13 +559,21 @@ struct HestiaModel {
         try document.encodeToJSONData()
     }
 
-    /// A model opened from saved JSON, drawn afresh through the geometry engine.
+    /// A model opened from saved JSON, drawn afresh through the geometry engine. A file with repeated IDs,
+    /// missing references, or walls and openings with no size is refused (`ModelIntegrity`).
     static func open(_ data: Data) throws -> HestiaModel {
         let document: ModelDocument
         do {
             document = try ModelDocument.decode(from: data)
         } catch {
             throw LoadError(message: "That file is not a Hestia model: \(error.localizedDescription)")
+        }
+        // A file written by hand, merged, or damaged can break what the commands guarantee, and the geometry and
+        // drawings rely on it, so it is refused before anything is drawn from it.
+        let problems = ModelIntegrity.problems(in: document)
+        guard problems.isEmpty else {
+            let more = problems.count > 3 ? " And \(problems.count - 3) more." : ""
+            throw LoadError(message: "That file can't be opened. " + problems.prefix(3).joined(separator: " ") + more)
         }
         return try HestiaModel(document: document)
     }
