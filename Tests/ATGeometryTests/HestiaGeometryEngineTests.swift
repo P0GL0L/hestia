@@ -171,10 +171,15 @@ private func cottageWallAreaError(_ footprints: [[Point2]], crossing: Double) ->
     let outlines = try HestiaGeometryEngine().planView(of: document, storey: document.storeys[0].id)
     // South wall: front door and kitchen window both cross the 4'-0" cut plane.
     #expect(outlines.filter { $0.elementID == document.walls[0].id.rawValue }.count == 3)
-    // North wall: the bath window sill is at 4'-6", above the cut, so only the bedroom window splits it.
-    #expect(outlines.filter { $0.elementID == document.walls[2].id.rawValue }.count == 2)
+    // North wall: the bedroom window crosses the cut and leaves a gap; the bath window's sill is at 4'-6", above
+    // the cut, so its span is a piece of its own seen beyond: three cut pieces and one beyond.
+    let north = outlines.filter { $0.elementID == document.walls[2].id.rawValue }
+    #expect(north.filter { $0.classification == .cut }.count == 3)
+    #expect(north.filter { $0.classification == .beyond }.count == 1)
     #expect(outlines.filter { $0.kind == .stair }.count == 1)
-    #expect(outlines.filter { $0.kind == .wall }.allSatisfy { $0.classification == .cut })
+    // Every other wall piece is cut.
+    let others = outlines.filter { $0.kind == .wall && $0.elementID != document.walls[2].id.rawValue }
+    #expect(others.allSatisfy { $0.classification == .cut })
 }
 
 @Test func roomAreasAreMeasuredFaceToFace() throws {
