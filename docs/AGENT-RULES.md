@@ -6,7 +6,7 @@ You are working in Hestia, the open-source macOS house-planning app. The GitHub 
 
 - Product name: Hestia.
 - Owner: P0GL0L. Approves contract changes, UI direction, the name, and releases.
-- Project manager: Jarvis. Coordinates. Does not merge, does not edit product code, and does not approve contracts.
+- Project manager: Jarvis. Coordinates, specifies each slice, and merges verified green slices (`docs/ALPHA.md`, Authority). Does not edit product code and does not approve contract changes.
 - Read your assignment in `docs/WORKSTREAMS.md` before editing.
 
 ## Ownership
@@ -19,11 +19,11 @@ You are working in Hestia, the open-source macOS house-planning app. The GitHub 
 | Grok CLI | E Exchange, F adapters and MCP | `docs/briefs/stream-e-exchange.md`, `docs/briefs/stream-f-agent.md` |
 | Any agent | G Catalog | `docs/briefs/stream-g-catalog.md` |
 
-Do not start another party's stream. Stream 0 is the only open start. A–G wait for tag `contracts-v1.0`.
+The table names each stream's default owner. Since `docs/ALPHA.md`, Jarvis may assign a slice in any stream to any party; work only on a slice you have been assigned, and only on the files its spec names. Until `contracts-v1.0` is tagged, streams advance slice by slice under that authority.
 
 ## Hard rules
 
-- One module per stream. Do not edit another module except through a `contract-change` pull request.
+- A slice touches the modules its spec names. A change to a public `ATContracts` type, command, or protocol is a `contract-change` and needs P0GL0L's approval.
 - No AppKit, SwiftUI, RealityKit, CoreGraphics, or Keychain under `Sources/`. Apple frameworks live only under `Apps/`.
 - Lengths are integer ticks once `Length` exists. No `Double` lengths in the model.
 - No direct model mutation. Commands only.
@@ -33,4 +33,4 @@ Do not start another party's stream. Stream 0 is the only open start. A–G wait
 
 ## Pull requests
 
-Branch `stream/<letter>-<topic>`. Target `main`. Green CI. Link the stream issue. Jarvis does not merge.
+Branch `stream/<letter>-<topic>`. Target `main`. Green CI. Link the stream issue. Jarvis merges when CI is green and the slice's evidence checks out; contract changes also need P0GL0L's approval.

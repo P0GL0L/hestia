@@ -4,8 +4,7 @@ Hestia is one Swift package in one repository. You own your module. You do not w
 
 ## Before you start
 
-- Stream 0 may start now.
-- Streams A–G start only after `contracts-v1.0` exists.
+- Work only on a slice Jarvis has assigned (`docs/ALPHA.md`, Authority); `contracts-v1.0` closes Stream 0.
 - Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and your file in [docs/briefs](docs/briefs).
 - Do not copy or reverse-engineer Plan7Architect: no code, icons, textures, catalog items, or file formats.
 
@@ -14,8 +13,8 @@ Hestia is one Swift package in one repository. You own your module. You do not w
 - Branch: `stream/<letter>-<topic>`
 - Pull requests target `main`.
 - Keep a PR to one behavior. About 600 changed lines is the normal cap. A geometry algorithm may exceed that if splitting it would fake the review. Say so in the PR.
-- Touch only your module and its tests, unless the PR is a labeled `contract-change`.
-- CI must be green: the `CI / bootstrap` check now, plus the Linux build, macOS build, tests, and SwiftLint once Stream 0 adds them.
+- Touch only the modules and tests your slice's spec names. Anything listed under Contract changes below is a labeled `contract-change`.
+- CI must be green: every check in `.github/workflows/`.
 - Tests for new behavior. No TODOs without a linked issue. Public API gets doc comments.
 - Unfinished work merges behind a feature flag. Do not park it on a long branch.
 

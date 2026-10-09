@@ -8,7 +8,7 @@ Nothing is done until its issue checklist is ticked and CI is green.
 
 | Stream | Owner | Start | Close tag |
 | --- | --- | --- | --- |
-| 0 Contracts | Claude | Now. This repo, no Swift modules yet. | `contracts-v1.0` |
+| 0 Contracts | Claude | Started. Open items are in the Stream 0 brief's checklist. | `contracts-v1.0` |
 | A Geometry | Claude Code | `contracts-v1.0` | `geometry-v0.5`, then `geometry-v1.0` |
 | B App shell and 2D | Cursor | `contracts-v1.0` and the mock `GeometryEngine` | App done criteria in the issue |
 | C 3D viewport | Cursor | `contracts-v1.0` mesh types. Real meshes at `geometry-v0.5`. | App done criteria in the issue |
@@ -17,7 +17,7 @@ Nothing is done until its issue checklist is ticked and CI is green.
 | F Adapters and MCP | Grok CLI | `contracts-v1.0`, plus Claude's tool schemas | Agent issue |
 | G Catalog | Any agent Jarvis assigns | `contracts-v1.0` | Catalog issue |
 
-Jarvis dispatches Stream 0 first. No other stream is dispatched until `contracts-v1.0` exists.
+Jarvis dispatched Stream 0 first. Since `docs/ALPHA.md` set the alpha bar and merge authority, Jarvis dispatches slices in any stream toward that bar; the checkpoints below remain the plan for the full release, and `contracts-v1.0` still closes Stream 0.
 
 ## Checkpoints
 
