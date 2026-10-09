@@ -56,7 +56,8 @@ private func tags(_ document: ModelDocument) throws -> [(String, Point2)] {
     let mixed = try tags(box([0, 2, 1, 3]))
     let walked = try tags(box([0, 1, 2, 3]))
     let mixedText: [String] = mixed.map(\.0)
-    #expect(mixedText == ["ROOM", "283 SF"])
+    // Name, clear size (20' x 15' less 3" at each face), and area.
+    #expect(mixedText == ["ROOM", "19'-6\" x 14'-6\"", "283 SF"])
     let walkedText: [String] = walked.map(\.0)
     #expect(mixedText == walkedText)
     // The same place as the box picked in order.

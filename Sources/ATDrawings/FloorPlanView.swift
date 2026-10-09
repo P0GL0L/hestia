@@ -57,18 +57,29 @@ enum FloorPlanView {
             items += symbol(for: opening, in: wall, view: view)
             if let mark = marks[opening.id] { items.append(tag(mark, for: opening, in: wall, view: view)) }
         }
-        let imperial = DrawingUnits.style(document, scale: view.scale) == .feetInchesFractions
+        let units = DrawingUnits.style(document, scale: view.scale)
+        let imperial = units == .feetInchesFractions
         for room in document.rooms where room.storeyID == storey {
-            guard let polygon = roomPolygon(room.boundaryWallIDs.compactMap { walls[$0] }) else { continue }
+            let boundary = room.boundaryWallIDs.compactMap { walls[$0] }
+            guard let polygon = roomPolygon(boundary) else { continue }
             let center = view.paper(centroid(polygon))
+            func line(_ drop: Int64) -> Point2 { Point2(x: center.x, y: Length(ticks: center.y.ticks - mmTicks(drop))) }
             items.append(DisplayItem(.text(position: center, string: room.name.uppercased(), height: .millimeters(3),
                                            rotation: .degrees(0), alignment: .center),
                                      style: roomStyle, elementID: room.id.rawValue))
+            // The clear size takes the line under the name; the area then moves down a line.
+            var areaDrop: Int64 = 5
+            if let size = clearSize(polygon, boundary: boundary) {
+                let text = DrawingUnits.label(size.width, style: units) + " x " + DrawingUnits.label(size.depth, style: units)
+                items.append(DisplayItem(.text(position: line(5), string: text, height: .millimeters(2),
+                                               rotation: .degrees(0), alignment: .center),
+                                         style: roomStyle, elementID: room.id.rawValue))
+                areaDrop = 9
+            }
             if let area = areas[room.id] {
                 items.append(DisplayItem(
-                    .text(position: Point2(x: center.x, y: Length(ticks: center.y.ticks - mmTicks(5))),
-                          string: areaLabel(area, imperial: imperial), height: .millimeters(2),
-                          rotation: .degrees(0), alignment: .center),
+                    .text(position: line(areaDrop), string: areaLabel(area, imperial: imperial),
+                          height: .millimeters(2), rotation: .degrees(0), alignment: .center),
                     style: roomStyle, elementID: room.id.rawValue))
             }
         }
@@ -93,6 +104,32 @@ enum FloorPlanView {
             corners.append(paperPoint(Int64((ax + adx * t).rounded()), Int64((ay + ady * t).rounded())))
         }
         return corners.count >= 3 ? corners : nil
+    }
+
+    /// A room's clear width (along x) and depth (along y), face to face, when its centerline polygon is a
+    /// rectangle square to the axes: each side's centerline less half the thickness of the walls on it. Nil for
+    /// any other shape, or when a side has no wall on it or walls of more than one thickness.
+    static func clearSize(_ polygon: [Point2], boundary: [Wall]) -> (width: Length, depth: Length)? {
+        guard polygon.count == 4 else { return nil }
+        let xs = Set(polygon.map(\.x.ticks)), ys = Set(polygon.map(\.y.ticks))
+        guard xs.count == 2, ys.count == 2, let x0 = xs.min(), let x1 = xs.max(), let y0 = ys.min(),
+              let y1 = ys.max() else { return nil }
+        // Every corner of the box must be in the polygon, so it is the box and not a bow tie of its corners.
+        let corners: Set<[Int64]> = Set(polygon.map { [$0.x.ticks, $0.y.ticks] })
+        guard corners == [[x0, y0], [x1, y0], [x1, y1], [x0, y1]] else { return nil }
+        /// Half the thickness of the walls lying on one side's line, when they agree.
+        func half(_ onSide: (Wall) -> Bool) -> Int64? {
+            let thicknesses = Set(boundary.filter(onSide).map(\.thickness.ticks))
+            guard thicknesses.count == 1, let thickness = thicknesses.first else { return nil }
+            return thickness / 2
+        }
+        guard let west = half({ $0.start.x.ticks == x0 && $0.end.x.ticks == x0 }),
+              let east = half({ $0.start.x.ticks == x1 && $0.end.x.ticks == x1 }),
+              let south = half({ $0.start.y.ticks == y0 && $0.end.y.ticks == y0 }),
+              let north = half({ $0.start.y.ticks == y1 && $0.end.y.ticks == y1 }) else { return nil }
+        let width = x1 - x0 - west - east, depth = y1 - y0 - south - north
+        guard width > 0, depth > 0 else { return nil }
+        return (Length(ticks: width), Length(ticks: depth))
     }
 
     /// Vertex average; good enough to place a tag inside a convex room.
