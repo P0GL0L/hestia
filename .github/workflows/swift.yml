@@ -27,8 +27,11 @@ jobs:
           swift test
 
   macos:
-    name: swift test and app build (macos)
+    name: swift test (macos, package only)
     runs-on: macos-15
+    env:
+      # Leaves the HestiaApp target out of the package (see Package.swift). The app is built on the owner's Mac.
+      HESTIA_PACKAGE_ONLY: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -39,14 +42,6 @@ jobs:
 
       - name: Run tests
         run: swift test
-
-      - name: Build Hestia.app
-        run: |
-          set -eu
-          app=$(Apps/Hestia/build-app.sh | tail -n 1)
-          test -x "$app/Contents/MacOS/Hestia"
-          file "$app/Contents/MacOS/Hestia"
-          plutil -lint "$app/Contents/Info.plist"
 
   swiftlint:
     name: swiftlint

@@ -1,5 +1,6 @@
 // swift-tools-version: 6.0
 
+import Foundation
 import PackageDescription
 
 let package = Package(
@@ -92,12 +93,16 @@ let package = Package(
     ]
 )
 
+// HESTIA_PACKAGE_ONLY=1 leaves the app out, so `swift test` builds and runs only the library modules
+// and their tests. The macOS CI runner sets it because its Xcode differs from the one the app ships with.
 #if os(macOS)
-package.targets.append(
-    .executableTarget(
-        name: "HestiaApp",
-        dependencies: ["ATContracts", "ATGeometry", "ATExchange", "ATDrawings"],
-        path: "Apps/Hestia/Sources/HestiaApp"
+if ProcessInfo.processInfo.environment["HESTIA_PACKAGE_ONLY"] == nil {
+    package.targets.append(
+        .executableTarget(
+            name: "HestiaApp",
+            dependencies: ["ATContracts", "ATGeometry", "ATExchange", "ATDrawings"],
+            path: "Apps/Hestia/Sources/HestiaApp"
+        )
     )
-)
+}
 #endif
