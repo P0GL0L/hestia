@@ -59,7 +59,7 @@ struct ContentView: View {
         do {
             _session = State(initialValue: EditSession(model: try HestiaModel.cottage()))
         } catch {
-            _loadError = State(initialValue: error.localizedDescription)
+            _loadError = State(initialValue: HestiaModel.describe(error))
         }
     }
 
@@ -226,7 +226,7 @@ struct ContentView: View {
             session = current
             status = "Added a wall. Undo removes it."
         } catch {
-            status = error.localizedDescription
+            status = HestiaModel.describe(error)
         }
     }
 
@@ -241,7 +241,7 @@ struct ContentView: View {
                 status = "That missed every wall. " + Tool.door.hint
             }
         } catch {
-            status = error.localizedDescription
+            status = HestiaModel.describe(error)
         }
     }
 
@@ -332,7 +332,7 @@ struct ContentView: View {
                 status = "That missed everything that can be removed. " + Tool.delete.hint
             }
         } catch {
-            status = error.localizedDescription
+            status = HestiaModel.describe(error)
         }
     }
 
@@ -379,7 +379,7 @@ struct ContentView: View {
             tool = .wall
             status = "New model. " + Tool.wall.hint
         } catch {
-            status = error.localizedDescription
+            status = HestiaModel.describe(error)
         }
     }
 
@@ -398,7 +398,7 @@ struct ContentView: View {
             roomWalls = []
             status = "Opened \(url.lastPathComponent)."
         } catch {
-            status = error.localizedDescription
+            status = HestiaModel.describe(error)
         }
     }
 
@@ -417,7 +417,7 @@ struct ContentView: View {
             status = "Saved \(url.lastPathComponent)."
             return true
         } catch {
-            status = error.localizedDescription
+            status = HestiaModel.describe(error)
             return false
         }
     }
@@ -454,7 +454,7 @@ struct ContentView: View {
             roomWalls = roomWalls.filter { walls.contains($0) }
             status = "Undone."
         } catch {
-            status = error.localizedDescription
+            status = HestiaModel.describe(error)
         }
     }
 
@@ -469,7 +469,7 @@ struct ContentView: View {
             roomWalls = roomWalls.filter { walls.contains($0) }
             status = "Redone."
         } catch {
-            status = error.localizedDescription
+            status = HestiaModel.describe(error)
         }
     }
 
@@ -516,7 +516,7 @@ struct ContentView: View {
             try body().write(to: url, options: .atomic)
             exportMessage = url.path
         } catch {
-            exportMessage = error.localizedDescription
+            exportMessage = HestiaModel.describe(error)
         }
     }
 }
