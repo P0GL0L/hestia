@@ -45,6 +45,9 @@ struct ContentView: View {
     @State private var exportMessage = "Schematic exports land in ~/Hestia-exports"
     /// This window's place in the list Quit asks.
     @State private var windowID = UUID()
+    /// The model area the plan view shows. It grows when the drawing outgrows it and otherwise holds still;
+    /// New and Open start it afresh.
+    @State private var viewArea: (min: Point2, max: Point2)?
 
     init() {
         do {
@@ -65,6 +68,9 @@ struct ContentView: View {
         }
         .background(WindowCloseGuard { confirmDiscard() })
         .onAppear { UnsavedChanges.shared.register(windowID) { confirmDiscard() } }
+        // A new or opened model starts the view afresh; an edit grows it only past what it already shows.
+        .task(id: session?.id) { viewArea = session?.model.viewArea(holding: nil) }
+        .task(id: session?.model.document) { viewArea = session?.model.viewArea(holding: viewArea) }
         .onDisappear { UnsavedChanges.shared.remove(windowID) }
     }
 
@@ -121,8 +127,14 @@ struct ContentView: View {
                 Spacer(minLength: 0)
             }
             HStack(spacing: 12) {
-                PlanCanvas(items: model.plan, bounds: model.planBounds, pendingStart: pendingStart,
-                           selected: Set(roomWalls.map(\.rawValue)), onClick: { paper in click(paper) })
+                PlanCanvas(items: model.modelPlan(), bounds: viewArea ?? model.viewArea(holding: nil),
+                           pendingStart: pendingStart.flatMap { model.planTransform?.model($0) },
+                           selected: Set(roomWalls.map(\.rawValue)),
+                           penScale: Double(model.planTransform?.scale.modelUnitsPerPaperUnit ?? 1),
+                           onClick: { point in
+                               // The tools work in the plan sheet's paper; take the model point there.
+                               if let paper = model.planTransform?.paper(point) { click(paper) }
+                           })
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.white)
                 OrbitScene(meshes: model.meshes, sessionID: sessionID)
