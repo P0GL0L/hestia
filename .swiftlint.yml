@@ -1,0 +1,48 @@
+# SwiftLint for Hestia. CI runs `swiftlint lint --strict --baseline .swiftlint-baseline.json`: any finding not
+# recorded in the baseline fails the build.
+#
+# The baseline records findings tied to one line (long lines and a few style items) at the time linting was
+# added. Size and complexity rules are not baselined, because their messages carry a count that changes whenever
+# the code around them grows; they have explicit project limits below instead. The largest values in the code
+# when the limits were set are noted beside each; splitting the two app files that are near the file limit is
+# tracked as code-health work.
+included:
+  - Sources
+  - Tests
+  - Apps
+excluded:
+  - .build
+  - Apps/Hestia/build
+
+disabled_rules:
+  # Multi-line literals end in a trailing comma by house style, which keeps diffs to one line per entry.
+  - trailing_comma
+
+identifier_name:
+  # Geometry code names coordinates and parameters as in the math: x, y, a, b, dx, t.
+  min_length: 1
+  max_length: 60
+
+line_length:
+  warning: 120
+  error: 160
+  ignores_urls: true
+
+file_length:            # largest: 822 (HestiaModel.swift)
+  warning: 1000
+  error: 1500
+type_body_length:       # largest: 492
+  warning: 600
+  error: 900
+function_body_length:   # largest: 123
+  warning: 150
+  error: 250
+cyclomatic_complexity:  # largest: 18
+  warning: 20
+  error: 30
+function_parameter_count:  # largest: 8 (command initializers)
+  warning: 8
+  error: 10
+large_tuple:            # geometry returns coordinate tuples
+  warning: 5
+  error: 7

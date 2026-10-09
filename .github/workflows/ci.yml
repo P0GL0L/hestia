@@ -24,3 +24,11 @@ jobs:
           grep -q "Apache License" LICENSE
           grep -q "Version 2.0" LICENSE
           echo "bootstrap ok"
+
+  platform-rules:
+    name: platform rules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sources/ imports only Foundation and Hestia modules
+        run: scripts/check-platform-rules.sh
