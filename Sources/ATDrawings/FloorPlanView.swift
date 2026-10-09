@@ -106,8 +106,19 @@ enum FloorPlanView {
         return String(format: "%.1f SQ M", squareMillimeters / 1_000_000)
     }
 
-    /// Jambs across the wall, then a swing and leaf for hinged doors, a slide line for other doors, and
-    /// glazing lines for windows. A cased opening is its two jambs only.
+    /// Where a pocket door's leaf sits, along the wall from its start: beside the opening toward the wall start,
+    /// as long as the opening is wide; toward the wall end when that run would pass the wall start; nil when
+    /// neither side of the wall has room, so the leaf is never drawn past a wall end.
+    static func pocketRun(opening: (a: Double, b: Double), wallLength: Double) -> (from: Double, to: Double)? {
+        let width = opening.b - opening.a
+        if opening.a - width >= 0 { return (opening.a - width, opening.a) }
+        if opening.b + width <= wallLength { return (opening.b, opening.b + width) }
+        return nil
+    }
+
+    /// Jambs across the wall, then a swing and leaf for hinged doors, the leaf in its pocket for a pocket door
+    /// (a rectangle inside the wall, a quarter of its thickness in from each face), a slide line for other doors,
+    /// and glazing lines for windows. A cased opening is its two jambs only.
     static func symbol(for opening: Opening, in wall: Wall, view: ViewTransform) -> [DisplayItem] {
         let sx = Double(wall.start.x.ticks), sy = Double(wall.start.y.ticks)
         let dx = Double(wall.end.x.ticks) - sx, dy = Double(wall.end.y.ticks) - sy
@@ -134,6 +145,14 @@ enum FloorPlanView {
         if !opening.kind.isDoor {
             for across in [-half / 3, half / 3] {
                 items.append(DisplayItem(.line(start: at(a, across), end: at(b, across)), style: style, elementID: id))
+            }
+            return items
+        }
+        if opening.kind == .pocketDoor {
+            if let pocket = pocketRun(opening: (a, b), wallLength: length) {
+                let inset = half / 2
+                let leaf = [at(pocket.from, -inset), at(pocket.to, -inset), at(pocket.to, inset), at(pocket.from, inset)]
+                items.append(DisplayItem(.polyline(points: leaf, closed: true), style: style, elementID: id))
             }
             return items
         }
