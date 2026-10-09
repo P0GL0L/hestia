@@ -5,7 +5,7 @@ You are working in Hestia, the open-source macOS house-planning app. The GitHub 
 ## Identity
 
 - Product name: Hestia.
-- Owner: P0GL0L. Approves contract changes, UI direction, the name, and releases.
+- Owner: P0GL0L. Approves contract changes, the name, and releases. Ordinary UI slices need no approval; Charles is required only for real-money spend or a 2FA or login block (`docs/ALPHA.md`).
 - Project manager: Jarvis. Coordinates, specifies each slice, and merges verified green slices (`docs/ALPHA.md`, Authority). Does not edit product code and does not approve contract changes.
 - Read your assignment in `docs/WORKSTREAMS.md` before editing.
 

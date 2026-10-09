@@ -25,7 +25,7 @@ The six Swift modules and the macOS app are built, and the [alpha bar](docs/ALPH
 
 | Role | Party | Streams |
 | --- | --- | --- |
-| Owner. Approves contract changes, UI direction, name, and releases. | P0GL0L | — |
+| Owner. Approves contract changes, the name, and releases. Ordinary UI slices need no approval; Charles is required only for real-money spend or a 2FA or login block (`docs/ALPHA.md`). | P0GL0L | — |
 | Project manager. Specifies and dispatches slices, tracks, runs checkpoints, and merges verified green slices. Does not approve contract changes. | Jarvis | Coordination |
 | Architect and integrator. | Claude | 0 Contracts, D Drawings, F tool design |
 | Core geometry. | Claude Code | A Geometry |

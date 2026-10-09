@@ -9,13 +9,13 @@ Nothing is done until its issue checklist is ticked and CI is green.
 | Stream | Owner | Start | Close tag |
 | --- | --- | --- | --- |
 | 0 Contracts | Claude | Started. Open items are in the Stream 0 brief's checklist. | `contracts-v1.0` |
-| A Geometry | Claude Code | `contracts-v1.0` | `geometry-v0.5`, then `geometry-v1.0` |
-| B App shell and 2D | Cursor | `contracts-v1.0` and the mock `GeometryEngine` | App done criteria in the issue |
-| C 3D viewport | Cursor | `contracts-v1.0` mesh types. Real meshes at `geometry-v0.5`. | App done criteria in the issue |
-| D Drawings | Claude | `geometry-v0.5` | `drawings-v1.0` |
-| E Exchange | Grok CLI | `contracts-v1.0` | Exchange issue |
-| F Adapters and MCP | Grok CLI | `contracts-v1.0`, plus Claude's tool schemas | Agent issue |
-| G Catalog | Any agent Jarvis assigns | `contracts-v1.0` | Catalog issue |
+| A Geometry | Claude Code | Started. Jarvis assigns its slices. | `geometry-v0.5`, then `geometry-v1.0` |
+| B App shell and 2D | Cursor | Started. Jarvis assigns its slices. | App done criteria in the issue |
+| C 3D viewport | Cursor | Started. Jarvis assigns its slices. | App done criteria in the issue |
+| D Drawings | Claude | Started. Jarvis assigns its slices. | `drawings-v1.0` |
+| E Exchange | Grok CLI | Started. Jarvis assigns its slices. | Exchange issue |
+| F Adapters and MCP | Grok CLI | Open. The module is a stub; Jarvis assigns its first slice. | Agent issue |
+| G Catalog | Any agent Jarvis assigns | Open. The module is a stub; Jarvis assigns its first slice. | Catalog issue |
 
 Jarvis dispatched Stream 0 first. Since `docs/ALPHA.md` set the alpha bar and merge authority, Jarvis dispatches slices in any stream toward that bar; the checkpoints below remain the plan for the full release, and `contracts-v1.0` still closes Stream 0.
 
