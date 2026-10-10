@@ -97,6 +97,14 @@ struct ContentView: View {
                     Button("New") { newModel() }
                     Button("Open…") { openModel() }
                     Button("Save…") { saveModel() }
+                        .background {
+                            // Command-S writes the remembered file. It is unseen, so it adds no button and no menu.
+                            Button("Save to the Current File") { saveToCurrentFile() }
+                                .keyboardShortcut("s", modifiers: .command)
+                                .opacity(0)
+                                .frame(width: 0, height: 0)
+                                .accessibilityHidden(true)
+                        }
                     Button("Undo") { undo() }
                         .keyboardShortcut("z", modifiers: .command)
                         .disabled(!(session?.canUndo ?? false))
@@ -369,7 +377,8 @@ struct ContentView: View {
     }
 
     /// Replaces the model with an empty one: one building, one ground storey, no walls. Nothing before it can
-    /// be undone.
+    /// be undone. The new session has no file, so the file from the last Open or Save is forgotten. A cancelled
+    /// discard leaves that file in place.
     private func newModel() {
         guard confirmDiscard() else { return }
         pendingStart = nil
@@ -383,7 +392,8 @@ struct ContentView: View {
         }
     }
 
-    /// Replaces the model with one read from a saved file. Nothing before it can be undone.
+    /// Replaces the model with one read from a saved file, and remembers that file. Nothing before it can be
+    /// undone. A cancelled panel, or a file that cannot be read, leaves the remembered file as it was.
     private func openModel() {
         guard confirmDiscard() else { return }
         let panel = NSOpenPanel()
@@ -394,7 +404,7 @@ struct ContentView: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         pendingStart = nil
         do {
-            session = EditSession(model: try HestiaModel.open(Data(contentsOf: url)))
+            session = EditSession(model: try HestiaModel.open(Data(contentsOf: url)), fileURL: url)
             roomWalls = []
             status = "Opened \(url.lastPathComponent)."
         } catch {
@@ -403,7 +413,7 @@ struct ContentView: View {
     }
 
     /// Writes the model's JSON where the person chooses. The undo history is not saved. Returns whether it was
-    /// written; a cancelled panel or a failed write leaves the document unsaved.
+    /// written. The Save… button always opens this panel. A cancelled panel leaves the remembered file as it was.
     @discardableResult
     private func saveModel() -> Bool {
         guard let model = session?.model else { return false }
@@ -411,9 +421,27 @@ struct ContentView: View {
         panel.allowedFileTypes = ["json"]
         panel.nameFieldStringValue = fileName(model, ".json")
         guard panel.runModal() == .OK, let url = panel.url else { return false }
+        return save(to: url)
+    }
+
+    /// Command-S. Writes the document to the file remembered from a successful Open or Save, and does not open a
+    /// panel. With no remembered file, opens the save panel.
+    private func saveToCurrentFile() {
+        guard let url = session?.fileURL else {
+            saveModel()
+            return
+        }
+        save(to: url)
+    }
+
+    /// Writes the document to `url` and remembers that file. A failed write leaves the document unsaved and the
+    /// remembered file as it was.
+    @discardableResult
+    private func save(to url: URL) -> Bool {
+        guard var current = session else { return false }
         do {
-            try model.saveData().write(to: url, options: .atomic)
-            session?.markSaved()
+            try current.save(to: url)
+            session = current
             status = "Saved \(url.lastPathComponent)."
             return true
         } catch {
