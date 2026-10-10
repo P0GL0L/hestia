@@ -13,6 +13,8 @@ struct HestiaModel {
     let sheets: [SheetDrawing]
     /// The 3D model, in absolute elevations.
     let meshes: [Mesh]
+    /// What the 3D view shows: the meshes upright, with floors, ceilings, furniture, and the site.
+    let house: HouseScene
     /// The storey the plan shows: the lowest.
     let groundStorey: StoreyID?
     /// The ground floor plan's walls, openings, stairs, and room tags, in sheet paper space.
@@ -35,6 +37,7 @@ struct HestiaModel {
         self.issueDate = issueDate
         sheets = try drawingSet.sheets(for: document, geometry: engine)
         meshes = try engine.meshes(of: document)
+        house = HouseScene(document: document, meshes: meshes)
         let ground = document.storeys.min { $0.elevation.ticks < $1.elevation.ticks }
         groundStorey = ground?.id
         let placed = ground.flatMap { drawingSet.planTransform(for: document, storey: $0.id) }
@@ -637,15 +640,19 @@ struct HestiaModel {
     static let viewMargin: Length = .feet(4)
 
     /// The model area the plan view shows: the area it already shows (`held`), grown only as far as the drawing
-    /// now needs, so the view stays still while drawing inside it. With nothing held it is the drawing with a
-    /// margin, or the blank 60' by 40' area when nothing is drawn yet.
+    /// now needs, so the view stays still while drawing inside it. With nothing held it is the drawing (with the
+    /// site and furniture) and a margin, or the blank 60' by 40' area when nothing is drawn yet.
     func viewArea(holding held: (min: Point2, max: Point2)?) -> (min: Point2, max: Point2) {
         let blank = (min: Point2(x: .feet(0), y: .feet(0)), max: Point2(x: .feet(60), y: .feet(40)))
         let margin = Self.viewMargin.ticks
-        let drawn = DisplayList(items: modelPlan()).bounds.map { bounds in
-            (min: Point2(x: Length(ticks: bounds.min.x.ticks - margin), y: Length(ticks: bounds.min.y.ticks - margin)),
-             max: Point2(x: Length(ticks: bounds.max.x.ticks + margin), y: Length(ticks: bounds.max.y.ticks + margin)))
-        }
+        // The drawn plan, the site's patches, and placed items, with a margin.
+        var corners = DisplayList(items: modelPlan()).bounds.map { [$0.min, $0.max] } ?? []
+        corners += document.terrainPatches.flatMap(\.boundary) + document.placements.map(\.position)
+        let xs = corners.map(\.x.ticks), ys = corners.map(\.y.ticks)
+        let drawn = xs.min().flatMap { x0 in ys.min().map { y0 in
+            (min: Point2(x: Length(ticks: x0 - margin), y: Length(ticks: y0 - margin)),
+             max: Point2(x: Length(ticks: (xs.max() ?? x0) + margin), y: Length(ticks: (ys.max() ?? y0) + margin)))
+        } }
         guard let base = held ?? drawn else { return blank }
         guard let drawn else { return base }
         return (min: Point2(x: Swift.min(base.min.x, drawn.min.x), y: Swift.min(base.min.y, drawn.min.y)),
@@ -719,9 +726,10 @@ struct HeldFit {
 /// last edit for redo.
 struct EditSession {
     private(set) var model: HestiaModel
-    private(set) var undoStack: [AnyCommand] = []
-    /// The commands that redo what was undone, the most recently undone last. A new edit clears it.
-    private(set) var redoStack: [AnyCommand] = []
+    /// Each step's inverse commands, in the order that undoes it; the last step last.
+    private(set) var undoStack: [[AnyCommand]] = []
+    /// The steps that redo what was undone, the most recently undone last. A new edit clears it.
+    private(set) var redoStack: [[AnyCommand]] = []
     /// Which session this is. Edits and undo keep it; New and Open start a session with a new one, so a view
     /// can tell a changed model from an edited one.
     let id = UUID()
@@ -906,18 +914,24 @@ struct EditSession {
 
     /// Applies a command, keeping its inverse. A new edit clears what could be redone.
     mutating func perform(_ command: AnyCommand) throws {
+        try perform(batch: [command])
+    }
+
+    /// Applies commands in order as one step that one Undo takes back. If any is refused, nothing changes.
+    mutating func perform(batch commands: [AnyCommand]) throws {
+        guard !commands.isEmpty else { return }
         var document = model.document
-        let inverse = try document.perform(command)
+        let inverses = try document.perform(batch: commands)
         model = try HestiaModel(document: document, issueDate: model.issueDate)
-        undoStack.append(inverse)
+        undoStack.append(inverses)
         redoStack.removeAll()
     }
 
-    /// Applies the inverse of the last change, keeping the command that puts it back for redo.
+    /// Applies the inverse of the last change, keeping the commands that put it back for redo.
     mutating func undo() throws {
-        guard let inverse = undoStack.last else { return }
+        guard let inverses = undoStack.last else { return }
         var document = model.document
-        let redo = try document.perform(inverse)
+        let redo = try document.perform(batch: inverses)
         model = try HestiaModel(document: document, issueDate: model.issueDate)
         undoStack.removeLast()
         redoStack.append(redo)
@@ -925,11 +939,11 @@ struct EditSession {
 
     /// Applies again the change last undone, keeping its inverse for undo.
     mutating func redo() throws {
-        guard let command = redoStack.last else { return }
+        guard let commands = redoStack.last else { return }
         var document = model.document
-        let inverse = try document.perform(command)
+        let inverses = try document.perform(batch: commands)
         model = try HestiaModel(document: document, issueDate: model.issueDate)
         redoStack.removeLast()
-        undoStack.append(inverse)
+        undoStack.append(inverses)
     }
 }
