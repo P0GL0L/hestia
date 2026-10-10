@@ -113,13 +113,6 @@ struct ContentView: View {
         }
     }
 
-    /// A view with a tool and a first point already chosen and no model loaded, for tests of what the tools do
-    /// with the pointer.
-    init(tool: Tool, anchor: Point2?) {
-        _tool = State(initialValue: tool)
-        _anchor = State(initialValue: anchor)
-    }
-
     var body: some View {
         Group {
             if let session {

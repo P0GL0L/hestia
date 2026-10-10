@@ -22,8 +22,7 @@ struct DrawingToolTests {
     @MainActor
     func nearAxisTargetStaysDiagonal() throws {
         let model = try HestiaModel.blank()
-        let view = ContentView(tool: .wall, anchor: feet(0, 0))
-        let target = view.target(feet(20, 0.5), model)
+        let target = ContentView.target(feet(20, 0.5), tool: .wall, anchor: feet(0, 0), model: model)
         #expect(target == feet(20, 0.5))
         #expect(target.y == Length.inches(6))
     }

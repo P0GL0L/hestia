@@ -47,6 +47,12 @@ extension ContentView {
     /// stairs, on a nearby wall end. The direction from the last corner is never squared to an axis, so a
     /// shallow diagonal stays the diagonal that was drawn.
     func target(_ raw: Point2, _ model: HestiaModel) -> Point2 {
+        Self.target(raw, tool: tool, anchor: anchor, model: model)
+    }
+
+    /// `target` for a given tool and chain anchor. The anchor is taken but never used to square the point, so a
+    /// near-axis wall from it stays as drawn.
+    static func target(_ raw: Point2, tool: Tool, anchor: Point2?, model: HestiaModel) -> Point2 {
         switch tool {
         case .wall, .room, .stair:
             return model.snappedWallEnd(raw)

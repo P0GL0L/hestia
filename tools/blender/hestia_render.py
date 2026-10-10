@@ -9,9 +9,10 @@
 # and trees for CC0 Poly Haven models of the same size where one fits, lights it with a real sky (HDRI) and a
 # sun, and renders it with Cycles. Downloads are cached, so later renders run offline.
 #
-# Downloads come only over HTTPS from Poly Haven's API and download hosts, stream to a temporary file under a
-# byte ceiling, and must match Poly Haven's declared size and MD5 before they replace anything in the cache;
-# every cache path is checked to stay inside the cache. A manifest beside the picture lists each asset file
+# Downloads come only over HTTPS from Poly Haven's API and download hosts (each redirect checked before it is
+# followed), stream to a unique, exclusively created partial file under a byte ceiling, and must match Poly
+# Haven's declared size and MD5 before they replace anything in the cache; every cache path is checked to stay
+# inside the cache. A manifest beside the picture lists each asset file
 # with its source, license, declared size and MD5, and computed SHA-256. Assets: Poly Haven, CC0.
 #
 # Blender is a separate program the user installs; Hestia only runs it. Output is a schematic visualization,
@@ -23,6 +24,7 @@ import json
 import math
 import os
 import sys
+import tempfile
 import urllib.parse
 import urllib.request
 
@@ -30,7 +32,7 @@ import bpy
 import mathutils
 
 API = "https://api.polyhaven.com/files/"
-SCRIPT_VERSION = "hestia_render 2"
+SCRIPT_VERSION = "hestia_render 3"
 
 # Surface look -> (Poly Haven texture, real size of one tile in meters). Looks not listed keep the USD color.
 TEXTURES = {
@@ -152,21 +154,53 @@ def digests(path):
     return md5.hexdigest(), sha.hexdigest()
 
 
-def download(url, path, limit, size=None, md5=None):
-    """Streams an allowlisted HTTPS file to `path`, checking the host after redirects, the byte ceiling, and the
-    declared size and MD5. A cached file is reused only when it still matches. Returns the path."""
+class CheckedRedirects(urllib.request.HTTPRedirectHandler):
+    """Follows a redirect only after its Location passes `checked_url`, before any request is sent there."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        checked_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def secure_opener():
+    """urllib's default handlers (proxies included) with redirects checked before they are followed."""
+    return urllib.request.build_opener(CheckedRedirects())
+
+
+def partial_file(directory):
+    """A new, uniquely named partial file inside `directory`, created exclusively (O_EXCL), so a planted
+    symlink or a second render can never be written through. Returns (descriptor, path)."""
+    return tempfile.mkstemp(prefix=".hestia-", suffix=".part", dir=directory)
+
+
+def remove_quietly(path):
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+
+
+def download(url, path, limit, size=None, md5=None, opener=None):
+    """Streams an allowlisted HTTPS file to `path`: every redirect is checked before it is followed and the final
+    URL again after; the byte ceiling holds while streaming; the declared size and MD5 must match. The bytes go
+    to a unique partial file beside `path` that replaces it in one step only when valid, and is removed
+    otherwise. A cached file is reused only when it is a regular file that still matches. Returns the path."""
     checked_url(url)
     if size is not None and size > limit:
         raise DownloadError("%s declares %d bytes, over the %d-byte ceiling" % (url, size, limit))
-    if os.path.exists(path):
+    if os.path.islink(path):
+        remove_quietly(path)
+    elif os.path.exists(path):
         if size is None or (os.path.getsize(path) == size and (md5 is None or digests(path)[0] == md5)):
             return path
-        os.remove(path)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    partial = path + ".part"
+        remove_quietly(path)
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    descriptor, partial = partial_file(directory)
     try:
         request = urllib.request.Request(url, headers={"User-Agent": "Hestia/0.1 (+https://github.com/P0GL0L/hestia)"})
-        with urllib.request.urlopen(request, timeout=120) as response, open(partial, "wb") as out:
+        with (opener or secure_opener()).open(request, timeout=120) as response, os.fdopen(descriptor, "wb") as out:
+            descriptor = None
             checked_url(response.geturl())
             written = 0
             for chunk in iter(lambda: response.read(1 << 16), b""):
@@ -181,15 +215,18 @@ def download(url, path, limit, size=None, md5=None):
         os.replace(partial, path)
         return path
     finally:
-        if os.path.exists(partial):
-            os.remove(partial)
+        if descriptor is not None:
+            os.close(descriptor)
+        remove_quietly(partial)
 
 
-def fetch(entry, cache, *relative, asset=""):
-    """A Poly Haven file entry (url, size, md5) downloaded into the cache at `relative`, recorded for the
-    manifest."""
-    url, size, md5 = entry["url"], entry.get("size"), entry.get("md5")
-    path = download(url, inside(cache, *relative), FILE_LIMIT, size, md5)
+def fetch(entry, cache, *relative, asset="", opener=None):
+    """A Poly Haven file entry downloaded into the cache at `relative`, recorded for the manifest. The entry
+    must declare its URL, size, and MD5; one that does not is refused."""
+    url, size, md5 = entry.get("url"), entry.get("size"), entry.get("md5")
+    if not isinstance(url, str) or not isinstance(size, int) or not isinstance(md5, str) or len(md5) != 32:
+        raise DownloadError("refused an asset file without a declared URL, size, and MD5: %r" % (entry,))
+    path = download(url, inside(cache, *relative), FILE_LIMIT, size, md5, opener)
     MANIFEST.append({"asset": asset, "url": url, "declaredSize": size, "declaredMD5": md5,
                      "sha256": digests(path)[1], "license": LICENSE_URL})
     return path

@@ -17,7 +17,12 @@ The picture is saved in `~/Hestia-exports` and opened.
 - **Blender is a separate, free program.** Hestia does not include it or link to its code. It only starts Blender as a separate program, the way a terminal would.
 - **Credit.** Materials, models, and sky come from [Poly Haven](https://polyhaven.com), CC0, through its public API. The app credits it beside Render Photo ("Powered by Poly Haven").
 - **First-run download.** Before the first photo, the app says what it will fetch: about 120 MB from Poly Haven, kept in `~/Library/Caches/Hestia/assets`. Later photos reuse the cache and work offline.
-- **Download safety.** The script fetches only over HTTPS from `api.polyhaven.com` and `dl.polyhaven.org`, and checks the host again after redirects. It streams each file under a byte ceiling, and keeps it only if it matches Poly Haven's declared size and MD5. A partial file is deleted, and a good one is moved into place in one step. Every cache path is checked to stay inside the cache, so absolute or `../` paths are refused. A cached file is checked again before it is reused. `tools/blender/test_hestia_render.py` covers the refusals.
+- **Download safety.**
+  - **Hosts:** the script fetches only over HTTPS from `api.polyhaven.com` and `dl.polyhaven.org`. Each redirect is checked before it is followed, and the final address is checked again.
+  - **Partial files:** each file streams under a byte ceiling into a new, uniquely named partial file, created exclusively, so a planted link or a second render is never written through.
+  - **Verification:** a file is moved into place in one step only if it matches the size and MD5 that Poly Haven declares. Asset entries without a declared size and MD5 are refused, and partial files are always removed.
+  - **Cache paths:** every cache path must stay inside the cache, so absolute paths, `../` and symlinks that lead out are refused. A cached file is checked again before reuse.
+  - **Tests:** `blender -b --factory-startup --python-exit-code 1 --python tools/blender/test_hestia_render.py` runs these checks offline.
 - **Manifest.** Beside each picture, `<name>.manifest.json` records:
   - every asset file used, with its URL, declared size and MD5, and computed SHA-256;
   - the source and license;
