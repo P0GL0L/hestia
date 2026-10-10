@@ -29,9 +29,16 @@ enum OpeningDetail {
         case casing, liner, sill, leaf, handle, sash, glass
     }
 
+    /// Which way a molded piece runs: up a jamb, or along the wall across a head or sill.
+    enum Run: Equatable, Sendable {
+        case up
+        case along
+    }
+
     /// One part of an opening as a box in the opening's frame: `along` the wall from its start and `across` from
     /// its centerline (left positive) give the box's middle; it stands on `z0`. A handle is drawn as the ball
-    /// that fits the box.
+    /// that fits the box. Casing is a molding cut to fill its box (`run`), its back on the wall and its face
+    /// toward `outward` (+1 the wall's left side, -1 its right).
     struct Piece: Equatable, Sendable {
         var part: Part
         var look: Look
@@ -41,6 +48,8 @@ enum OpeningDetail {
         var length: Double
         var depth: Double
         var tall: Double
+        var run: Run?
+        var outward: Double = 1
     }
 
     static func add(_ document: ModelDocument, to solids: inout [Look: Solid]) {
@@ -52,12 +61,33 @@ enum OpeningDetail {
                     Shapes.ellipsoid(&solid, cx: middle.x, cy: middle.y, cz: piece.z0 + piece.tall / 2,
                                      rx: piece.length / 2, ry: piece.depth / 2, rz: piece.tall / 2,
                                      rings: 6, segments: 10)
+                } else if let run = piece.run {
+                    mold(piece, run: run, in: frame, to: &solid)
                 } else {
                     frame.box(&solid, along: piece.along, across: piece.across, z0: piece.z0,
                               length: piece.length, depth: piece.depth, tall: piece.tall)
                 }
                 solids[piece.look] = solid
             }
+        }
+    }
+
+    /// A casing piece as a molding filling its box: its back on the wall, its face out, its length along `run`.
+    private static func mold(_ piece: Piece, run: Run, in frame: Frame, to solid: inout Solid) {
+        let along = Vector(frame.ux, frame.uy, 0)
+        let left = Vector(-frame.uy, frame.ux, 0)
+        let up = Vector(0, 0, 1)
+        let back = piece.across - piece.outward * piece.depth / 2
+        let corner = frame.point(piece.along - piece.length / 2, back)
+        let start = Vector(corner.x, corner.y, piece.z0)
+        let out = left * piece.outward
+        switch run {
+        case .up:
+            Molding.casing(width: piece.length, proud: piece.depth)
+                .extrude(&solid, start: start, run: up, length: piece.tall, across: along, out: out)
+        case .along:
+            Molding.casing(width: piece.tall, proud: piece.depth)
+                .extrude(&solid, start: start, run: along, length: piece.length, across: up, out: out)
         }
     }
 
@@ -136,24 +166,28 @@ enum OpeningDetail {
         }
     }
 
-    /// Casing on both faces, two legs and a head standing proud of the wall, and for a window a bottom piece too;
-    /// then the liners across the wall's thickness, so the opening reads as finished, not cut. Casing always fits;
+    /// Molded casing on both faces of the wall, two legs and a head, and for a window a bottom piece too; then
+    /// the liners across the wall's thickness, so the opening reads as finished, not cut. Casing always fits;
     /// liners only when the opening is big enough to show between them.
     private static func trim(_ frame: Frame, withSill: Bool = false) -> [Piece] {
-        let depth = frame.wallThickness + 2 * proud
         let bottom = withSill ? frame.sill - casing : frame.sill
         let legTall = frame.top + casing - bottom
-        var pieces = [
-            Piece(part: .casing, look: .trim, along: frame.start - casing / 2, z0: bottom, length: casing,
-                  depth: depth, tall: legTall),
-            Piece(part: .casing, look: .trim, along: frame.start + frame.width + casing / 2, z0: bottom,
-                  length: casing, depth: depth, tall: legTall),
-            Piece(part: .casing, look: .trim, along: frame.middle, z0: frame.top, length: frame.width, depth: depth,
-                  tall: casing),
-        ]
-        if withSill {
-            pieces.append(Piece(part: .casing, look: .trim, along: frame.middle, z0: frame.sill - casing,
-                                length: frame.width, depth: depth, tall: casing))
+        var pieces: [Piece] = []
+        for side in [1.0, -1.0] {
+            let across = side * (frame.wallThickness / 2 + proud / 2)
+            pieces += [
+                Piece(part: .casing, look: .trim, along: frame.start - casing / 2, across: across, z0: bottom,
+                      length: casing, depth: proud, tall: legTall, run: .up, outward: side),
+                Piece(part: .casing, look: .trim, along: frame.start + frame.width + casing / 2, across: across,
+                      z0: bottom, length: casing, depth: proud, tall: legTall, run: .up, outward: side),
+                Piece(part: .casing, look: .trim, along: frame.middle, across: across, z0: frame.top,
+                      length: frame.width, depth: proud, tall: casing, run: .along, outward: side),
+            ]
+            if withSill {
+                pieces.append(Piece(part: .casing, look: .trim, along: frame.middle, across: across,
+                                    z0: frame.sill - casing, length: frame.width, depth: proud, tall: casing,
+                                    run: .along, outward: side))
+            }
         }
         guard frame.hasLiners else { return pieces }
         let jambTall = frame.height - liner
