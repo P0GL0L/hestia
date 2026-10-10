@@ -4,21 +4,28 @@ import SwiftUI
 /// The floor plan as the drawing set draws it: walls with their hatch, door swings, glazing, stairs, floor
 /// openings, and room tags, fitted to the view. Items are in model space, so they stay put when an edit moves
 /// the plan on its sheet, and `bounds` is the model area the view fits, which the caller holds steady while
-/// drawing. With no items, that area is outlined so there is somewhere to click. A click reports the model
-/// point under it; `pendingStart`, a model point, is marked while a wall waits for its end, and walls whose IDs
-/// are in `selected` are outlined in orange. `penScale` is the plan's scale ratio, so pens keep their printed
-/// widths.
+/// drawing; `zoom` and `pan` move the view over it. With no items, that area is outlined so there is somewhere
+/// to click. Terrain from `overlay` draws under the plan and furniture over it; `preview` and `labels` show
+/// what the current tool is about to add. `pendingStart`, a model point, is marked while a tool waits for its
+/// second point, and walls whose IDs are in `selected` are outlined in orange. `penScale` is the plan's scale
+/// ratio, so pens keep their printed widths. Pointer, scroll, and key input goes to `onInput` with the fit it
+/// was made in.
 struct PlanCanvas: View {
     var items: [DisplayItem]
     var bounds: (min: Point2, max: Point2)?
     var pendingStart: Point2?
     var selected: Set<UUID> = []
     var penScale: Double = 1
-    var onClick: (Point2) -> Void
+    var overlay = PlanOverlay()
+    var preview: [PlanOverlay.Shape] = []
+    var labels: [PlanOverlay.Label] = []
+    var zoom: Double = 1
+    var pan: CGSize = .zero
+    var onInput: @MainActor (PlanInput, PlanFit) -> Void
 
     var body: some View {
         GeometryReader { proxy in
-            let fit = bounds.map { PlanFit(bounds: $0, size: proxy.size) }
+            let fit = bounds.map { PlanFit(bounds: $0, size: proxy.size, zoom: zoom, pan: pan) }
             Canvas { context, _ in
                 guard let fit, let bounds else { return }
                 if items.isEmpty {
@@ -29,8 +36,14 @@ struct PlanCanvas: View {
                     let outline = StrokeStyle(lineWidth: 1, dash: [4, 4])
                     context.stroke(Path(area), with: .color(Color(white: 0.8)), style: outline)
                 }
+                for shape in overlay.under {
+                    paint(shape, in: &context, fit: fit)
+                }
                 for item in items {
                     draw(item, in: &context, fit: fit)
+                }
+                for shape in overlay.over {
+                    paint(shape, in: &context, fit: fit)
                 }
                 for item in items where item.style.layer == "A-WALL" {
                     guard let id = item.elementID, selected.contains(id),
@@ -38,19 +51,50 @@ struct PlanCanvas: View {
                     let outline = polyline(points, closed: closed, fit: fit)
                     context.stroke(outline, with: .color(.orange), lineWidth: 3)
                 }
+                for shape in preview {
+                    paint(shape, in: &context, fit: fit)
+                }
+                for label in overlay.labels + labels {
+                    write(label, in: &context, fit: fit)
+                }
                 if let start = pendingStart {
                     let p = fit.point(start)
                     let mark = Path(ellipseIn: CGRect(x: p.x - 4, y: p.y - 4, width: 8, height: 8))
                     context.stroke(mark, with: .color(.orange), lineWidth: 2)
                 }
             }
-            .contentShape(Rectangle())
-            // A press and release without moving: the package's macOS target has DragGesture, not located taps.
-            .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .local).onEnded { value in
-                guard let fit else { return }
-                onClick(fit.paper(value.location))
+            .overlay(PlanMouse { input in
+                if let fit { onInput(input, fit) }
             })
         }
+    }
+
+    private func paint(_ shape: PlanOverlay.Shape, in context: inout GraphicsContext, fit: PlanFit) {
+        let path = polyline(shape.points, closed: shape.closed, fit: fit)
+        switch shape.paint {
+        case let .fill(look, opacity):
+            let rgb = look.rgb
+            context.fill(path, with: .color(Color(red: rgb.red, green: rgb.green, blue: rgb.blue).opacity(opacity)))
+        case let .stroke(red, green, blue, width, dashed):
+            let style = dashed ? StrokeStyle(lineWidth: width, dash: [5, 4]) : StrokeStyle(lineWidth: width)
+            context.stroke(path, with: .color(Color(red: red, green: green, blue: blue)), style: style)
+        }
+    }
+
+    /// A label centered on its point; a highlighted one on a white tag, for the length being drawn.
+    private func write(_ label: PlanOverlay.Label, in context: inout GraphicsContext, fit: PlanFit) {
+        let color = label.highlighted ? Color(red: 0.75, green: 0.3, blue: 0) : Color(white: 0.25)
+        let text = context.resolve(Text(label.text).font(.system(size: label.size, weight: label.highlighted ? .semibold
+            : .regular)).foregroundColor(color))
+        let point = fit.point(label.position)
+        if label.highlighted {
+            let size = text.measure(in: CGSize(width: 400, height: 60))
+            let tag = CGRect(x: point.x - size.width / 2 - 4, y: point.y - size.height / 2 - 2,
+                             width: size.width + 8, height: size.height + 4)
+            context.fill(Path(roundedRect: tag, cornerRadius: 4), with: .color(Color.white.opacity(0.92)))
+            context.stroke(Path(roundedRect: tag, cornerRadius: 4), with: .color(color), lineWidth: 1)
+        }
+        context.draw(text, at: point, anchor: .center)
     }
 
     private func draw(_ item: DisplayItem, in context: inout GraphicsContext, fit: PlanFit) {
