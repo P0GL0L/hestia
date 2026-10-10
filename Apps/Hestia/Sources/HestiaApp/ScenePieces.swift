@@ -20,7 +20,7 @@ struct ScenePoint: Equatable, Sendable {
 
 /// How a surface looks in the 3D view. The colors are schematic, picked to read clearly in daylight.
 enum Look: String, CaseIterable, Sendable {
-    case wall, glass, door, roof, slab, stair, structure
+    case wall, glass, door, trim, roof, slab, stair, structure
     case woodFloor, tileFloor, carpet, ceiling
     case grass, lawn, concrete, paving, gravel, water, mulch, deck
     case fabric, fabricDark, leather, wood, woodDark, white, metal, porcelain, stone, linen, black
@@ -32,6 +32,7 @@ enum Look: String, CaseIterable, Sendable {
         case .wall: return (0.93, 0.91, 0.87)
         case .glass: return (0.62, 0.80, 0.92)
         case .door: return (0.55, 0.38, 0.24)
+        case .trim: return (0.96, 0.95, 0.93)
         case .roof: return (0.36, 0.24, 0.20)
         case .slab, .concrete: return (0.72, 0.71, 0.68)
         case .stair: return (0.70, 0.52, 0.31)

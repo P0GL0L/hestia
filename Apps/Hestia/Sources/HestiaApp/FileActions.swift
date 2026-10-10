@@ -192,6 +192,66 @@ extension ContentView {
         }
     }
 
+    /// The house as OpenUSD, for Blender, Maya, 3ds Max, Houdini, and their renderers.
+    func exportUSD(_ model: HestiaModel) {
+        writeExport(name: fileName(model, ".usda")) {
+            Data(HouseUSD.export(document: model.document, meshes: model.meshes).utf8)
+        }
+    }
+
+    /// A photoreal still of the house from Blender's Cycles renderer, saved in ~/Hestia-exports and opened.
+    /// Without Blender installed, offers to get it.
+    func renderPhoto(_ model: HestiaModel, view: PhotoRender.View) {
+        guard !rendering else { return }
+        guard let blender = PhotoRender.blender() else {
+            askForBlender()
+            return
+        }
+        guard let script = PhotoRender.script() else {
+            status = "The render script is missing from this copy of Hestia."
+            return
+        }
+        do {
+            let directory = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Hestia-exports", isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let output = Self.unusedURL(for: fileName(model, "-\(view.rawValue).png"), in: directory)
+            let usd = FileManager.default.temporaryDirectory.appendingPathComponent("hestia-\(UUID()).usda")
+            try Data(HouseUSD.export(document: model.document, meshes: model.meshes).utf8).write(to: usd)
+            rendering = true
+            status = "Rendering the \(view == .exterior ? "outside" : "inside") with Blender. The first render "
+                + "downloads materials and models, so it takes a few minutes."
+            Task {
+                do {
+                    try await PhotoRender.render(blender: blender, script: script, usd: usd, output: output,
+                                                 view: view)
+                    exportMessage = output.path
+                    status = "Rendered \(output.lastPathComponent). Schematic visualization, not for construction."
+                    NSWorkspace.shared.open(output)
+                } catch {
+                    status = HestiaModel.describe(error)
+                }
+                try? FileManager.default.removeItem(at: usd)
+                rendering = false
+            }
+        } catch {
+            status = HestiaModel.describe(error)
+        }
+    }
+
+    /// Hestia renders photos with Blender, which is free; offers to open its download page.
+    func askForBlender() {
+        let alert = NSAlert()
+        alert.messageText = "Photo renders use Blender"
+        alert.informativeText = "Blender is a free 3D program. Install it in Applications, then choose Render Photo "
+            + "again. Hestia runs it in the background; you never have to open it."
+        alert.addButton(withTitle: "Get Blender")
+        alert.addButton(withTitle: "Cancel")
+        if alert.runModal() == .alertFirstButtonReturn, let url = URL(string: "https://www.blender.org/download/") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     /// `name` in `directory`, or, when a file of that name is already there, the name with the lowest free
     /// number before its extension ("rect-cottage-schematic-set 2.pdf", then 3), so an export never replaces
     /// an earlier one.

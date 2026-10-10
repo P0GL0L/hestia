@@ -57,8 +57,9 @@ enum SiteKind: String, CaseIterable, Sendable {
     }
 }
 
-/// Everything the 3D view shows, in view space (feet, y up): the engine's walls, openings, stairs, and roofs; a
-/// floor and a ceiling in each room; placed furniture and planting; and the ground, lot, and paving.
+/// Everything the 3D view shows, in view space (feet, y up): the engine's walls, stairs, and roofs; trimmed
+/// doors and windows (`OpeningDetail`); a floor and a ceiling in each room; placed furniture and planting; and
+/// the ground, lot, and paving.
 struct HouseScene: Equatable, Sendable {
     var solids: [Solid]
     /// The middle of the house, in view space, for the camera to look at.
@@ -74,6 +75,7 @@ struct HouseScene: Equatable, Sendable {
         var house: [Look: Solid] = [:]
         var outdoor: [Look: Solid] = [:]
         Self.addEngineMeshes(meshes, to: &house)
+        OpeningDetail.add(document, to: &house)
         Self.addRooms(document, to: &house)
         for placement in document.placements {
             let item = Furniture.item(placement.catalogItemID) ?? Furniture.placeholder(placement.catalogItemID)
@@ -110,7 +112,9 @@ struct HouseScene: Equatable, Sendable {
 
     /// The engine's meshes, merged into one solid per look and turned from z up to y up.
     private static func addEngineMeshes(_ meshes: [Mesh], to solids: inout [Look: Solid]) {
-        for mesh in meshes where !mesh.indices.isEmpty {
+        // Doors and glass come from `OpeningDetail` instead: the engine's are flat panes with no thickness.
+        let replaced: Set<String> = ["door", "glass"]
+        for mesh in meshes where !mesh.indices.isEmpty && !replaced.contains(mesh.materialID.rawValue) {
             let (look, group) = look(for: mesh.materialID)
             var solid = solids[look] ?? Solid(look: look, group: group)
             let base = UInt32(solid.positions.count)

@@ -86,6 +86,8 @@ struct ContentView: View {
     @State var layout = Layout.split
     @State var houseMode = HouseViewMode.orbit
     @State var showRoof = true
+    /// Whether Blender is rendering a photo.
+    @State var rendering = false
     @State var status = Tool.wall.hint
     @State var exportMessage = "Schematic exports land in ~/Hestia-exports"
     /// This window's place in the list Quit asks.
@@ -202,6 +204,13 @@ struct ContentView: View {
             HStack(spacing: 6) {
                 Button("Export PDF") { exportPDF(model) }
                 Button("Export DXF") { exportDXF(model) }
+                Button("Export USD") { exportUSD(model) }
+                Menu(rendering ? "Rendering…" : "Render Photo") {
+                    Button("Outside, from the street") { renderPhoto(model, view: .exterior) }
+                    Button("Inside, the living room") { renderPhoto(model, view: .interior) }
+                }
+                .disabled(rendering)
+                .fixedSize()
             }
             .fixedSize()
         }
