@@ -2,8 +2,8 @@ import ATContracts
 import ATDrawings
 import Foundation
 
-/// The house as an OpenUSD text file (`.usda`), for Blender, Maya, 3ds Max, Houdini, and the renderers they
-/// drive (Cycles, Arnold, V-Ray, RenderMan).
+/// The house as an OpenUSD text file (`.usda`): basic geometry and `UsdPreviewSurface` materials. Blender 5.2
+/// import is tested (docs/RENDERING.md); other OpenUSD programs are not yet.
 ///
 /// Layout: `/Hestia/Building` holds the walls, openings, stairs, roof, floors, and ceilings, one mesh per surface
 /// look; `/Hestia/Site` holds the ground and the terrain patches; `/Hestia/Items` holds one Xform per placed
@@ -70,12 +70,37 @@ enum HouseUSD {
         return text
     }
 
-    /// A prim name from any text: letters, digits, and underscores, not starting with a digit.
+    /// A prim name from any text: ASCII letters, digits, and underscores, not starting with a digit, and never
+    /// empty, so any room name or catalog ID makes a valid identifier.
     static func name(_ text: String) -> String {
-        let cleaned = String(text.map { $0.isLetter || $0.isNumber ? $0 : "_" })
+        let cleaned = String(text.unicodeScalars.map { scalar -> Character in
+            scalar.isASCII && (CharacterSet.alphanumerics.contains(scalar)) ? Character(scalar) : "_"
+        })
         let trimmed = cleaned.hasPrefix("hestia_") ? String(cleaned.dropFirst(7)) : cleaned
         guard let first = trimmed.first, !first.isNumber else { return "_" + trimmed }
         return trimmed
+    }
+
+    /// Text as a USDA string literal, quotes included: backslashes, quotes, and control characters escaped, so
+    /// no name can end the string or start a new line of the file. Other Unicode is kept as UTF-8.
+    static func quoted(_ text: String) -> String {
+        var literal = "\""
+        for scalar in text.unicodeScalars {
+            switch scalar {
+            case "\\": literal += "\\\\"
+            case "\"": literal += "\\\""
+            case "\n": literal += "\\n"
+            case "\r": literal += "\\r"
+            case "\t": literal += "\\t"
+            default:
+                if scalar.value < 0x20 || scalar.value == 0x7F {
+                    literal += String(format: "\\x%02x", scalar.value)
+                } else {
+                    literal.unicodeScalars.append(scalar)
+                }
+            }
+        }
+        return literal + "\""
     }
 
     private static func number(_ value: Float) -> String {
@@ -148,7 +173,7 @@ enum HouseUSD {
         var text = """
         \(pad)def Xform "\(name)"
         \(pad){
-        \(pad)    custom string hestia:catalogItem = "\(item)"
+        \(pad)    custom string hestia:catalogItem = \(quoted(item))
         \(pad)    double3 xformOp:translate = \(tuple(point))
         \(pad)    float xformOp:rotateY = \(degrees)
         \(pad)    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateY"]
@@ -178,12 +203,11 @@ enum HouseUSD {
             let base = name(room.name)
             counts[base, default: 0] += 1
             let prim = counts[base] == 1 ? base : "\(base)_\(counts[base] ?? 1)"
-            let label = room.name.replacingOccurrences(of: "\"", with: "'")
             text += """
                     def Xform "\(prim)"
                     {
-                        custom string hestia:room = "\(label)"
-                        custom string hestia:floorLook = "\(HouseScene.floorLook(room).rawValue)"
+                        custom string hestia:room = \(quoted(room.name))
+                        custom string hestia:floorLook = \(quoted(HouseScene.floorLook(room).rawValue))
                         custom float2 hestia:size = (\(number(Float(width))), \(number(Float(depth))))
                         double3 xformOp:translate = \(tuple(.plan(middle.x, middle.y, ceiling)))
                         uniform token[] xformOpOrder = ["xformOp:translate"]

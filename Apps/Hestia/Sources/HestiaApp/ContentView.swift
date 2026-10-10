@@ -113,6 +113,13 @@ struct ContentView: View {
         }
     }
 
+    /// A view with a tool and a first point already chosen and no model loaded, for tests of what the tools do
+    /// with the pointer.
+    init(tool: Tool, anchor: Point2?) {
+        _tool = State(initialValue: tool)
+        _anchor = State(initialValue: anchor)
+    }
+
     var body: some View {
         Group {
             if let session {
@@ -207,10 +214,16 @@ struct ContentView: View {
                 Button("Export USD") { exportUSD(model) }
                 Menu(rendering ? "Rendering…" : "Render Photo") {
                     Button("Outside, from the street") { renderPhoto(model, view: .exterior) }
-                    Button("Inside, the living room") { renderPhoto(model, view: .interior) }
+                    Button("Inside the house") { renderPhoto(model, view: .interior) }
+                    Divider()
+                    Text("Materials, models, and sky: Poly Haven, CC0")
                 }
                 .disabled(rendering)
                 .fixedSize()
+                Text("Powered by Poly Haven")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .fixedSize()
             }
             .fixedSize()
         }

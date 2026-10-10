@@ -2,7 +2,8 @@ import Foundation
 
 /// Photoreal stills through Blender's Cycles renderer. Blender is a free, separate program the person installs;
 /// Hestia exports the house as OpenUSD and runs Blender in the background with `hestia_render.py`, which adds
-/// CC0 materials, models, and sky from Poly Haven and renders. Nothing of Blender is built into Hestia.
+/// CC0 materials, models, and sky from Poly Haven (credited in the app) and renders. Nothing of Blender is built
+/// into Hestia. Each picture gets a manifest beside it listing every asset file used.
 enum PhotoRender {
     enum View: String, CaseIterable, Sendable {
         case exterior
@@ -43,6 +44,11 @@ enum PhotoRender {
     static var cache: URL {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Hestia/assets", isDirectory: true)
+    }
+
+    /// Whether an earlier render already downloaded assets into the cache.
+    static var hasAssets: Bool {
+        FileManager.default.fileExists(atPath: cache.appendingPathComponent("index").path)
     }
 
     /// Renders `usd` to `output` with Blender and returns when the picture is written. Throws with Blender's last

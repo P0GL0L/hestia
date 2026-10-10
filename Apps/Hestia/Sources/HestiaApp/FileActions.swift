@@ -192,7 +192,7 @@ extension ContentView {
         }
     }
 
-    /// The house as OpenUSD, for Blender, Maya, 3ds Max, Houdini, and their renderers.
+    /// The house's geometry and basic materials as OpenUSD. Blender import is tested; other programs are not yet.
     func exportUSD(_ model: HestiaModel) {
         writeExport(name: fileName(model, ".usda")) {
             Data(HouseUSD.export(document: model.document, meshes: model.meshes).utf8)
@@ -211,6 +211,7 @@ extension ContentView {
             status = "The render script is missing from this copy of Hestia."
             return
         }
+        guard PhotoRender.hasAssets || confirmFirstDownload() else { return }
         do {
             let directory = FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent("Hestia-exports", isDirectory: true)
@@ -226,7 +227,8 @@ extension ContentView {
                     try await PhotoRender.render(blender: blender, script: script, usd: usd, output: output,
                                                  view: view)
                     exportMessage = output.path
-                    status = "Rendered \(output.lastPathComponent). Schematic visualization, not for construction."
+                    status = "Rendered \(output.lastPathComponent), with its asset manifest beside it. Assets: Poly "
+                        + "Haven, CC0. Schematic visualization, not for construction."
                     NSWorkspace.shared.open(output)
                 } catch {
                     status = HestiaModel.describe(error)
@@ -237,6 +239,19 @@ extension ContentView {
         } catch {
             status = HestiaModel.describe(error)
         }
+    }
+
+    /// Before the first photo: what will be downloaded, from where, and where it is kept. Returns whether to go
+    /// ahead.
+    func confirmFirstDownload() -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "The first photo downloads its materials"
+        alert.informativeText = "Hestia fetches about 120 MB of free CC0 materials, furniture and tree models, and a "
+            + "sky image from Poly Haven (polyhaven.com), checks each file against Poly Haven's size and checksum, "
+            + "and keeps them in ~/Library/Caches/Hestia/assets. Later photos reuse them and work offline."
+        alert.addButton(withTitle: "Download and Render")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     /// Hestia renders photos with Blender, which is free; offers to open its download page.

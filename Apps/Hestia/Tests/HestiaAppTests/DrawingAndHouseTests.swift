@@ -17,6 +17,18 @@ private func metricSession() throws -> EditSession {
 
 @Suite("Drawing tools")
 struct DrawingToolTests {
+    #if canImport(SwiftUI)
+    @Test("The Wall tool, continuing a chain, keeps a point drawn close to an axis where it was drawn")
+    @MainActor
+    func nearAxisTargetStaysDiagonal() throws {
+        let model = try HestiaModel.blank()
+        let view = ContentView(tool: .wall, anchor: feet(0, 0))
+        let target = view.target(feet(20, 0.5), model)
+        #expect(target == feet(20, 0.5))
+        #expect(target.y == Length.inches(6))
+    }
+    #endif
+
     @Test("A wall drawn close to an axis stays the diagonal it was drawn")
     func nearAxisWallStaysDiagonal() throws {
         var session = EditSession(model: try HestiaModel.blank())
@@ -77,6 +89,17 @@ struct DrawingToolTests {
         let patch = try #require(session.model.document.terrainPatches.first)
         let xs = patch.boundary.map(\.x), ys = patch.boundary.map(\.y)
         #expect(xs.min() == Length(ticks: -size.0.ticks) && ys.max() == size.1)
+    }
+
+    @Test("A typed metric site area keeps a fractional size")
+    func typedMetricSiteIsExact() throws {
+        var session = try metricSession()
+        let size = try #require(LengthEntry.pair("12.3456 x 7.8901", metric: true))
+        #expect(size.0 == Length(ticks: 3_950_592) && size.1 == Length(ticks: 2_524_832))
+        let corner = PlanGeometry.corner(from: feet(0, 0), toward: feet(50, 50), width: size.0, depth: size.1)
+        try session.addSitePatch(.patio, from: feet(0, 0), to: corner, exact: true)
+        let patch = try #require(session.model.document.terrainPatches.first)
+        #expect(patch.boundary.map(\.x).max() == size.0 && patch.boundary.map(\.y).max() == size.1)
     }
 
     @Test("A patch's survey points move with it, through undo and redo")

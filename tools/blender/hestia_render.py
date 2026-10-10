@@ -9,20 +9,28 @@
 # and trees for CC0 Poly Haven models of the same size where one fits, lights it with a real sky (HDRI) and a
 # sun, and renders it with Cycles. Downloads are cached, so later renders run offline.
 #
+# Downloads come only over HTTPS from Poly Haven's API and download hosts, stream to a temporary file under a
+# byte ceiling, and must match Poly Haven's declared size and MD5 before they replace anything in the cache;
+# every cache path is checked to stay inside the cache. A manifest beside the picture lists each asset file
+# with its source, license, declared size and MD5, and computed SHA-256. Assets: Poly Haven, CC0.
+#
 # Blender is a separate program the user installs; Hestia only runs it. Output is a schematic visualization,
 # not a construction document.
 
 import argparse
+import hashlib
 import json
 import math
 import os
 import sys
+import urllib.parse
 import urllib.request
 
 import bpy
 import mathutils
 
 API = "https://api.polyhaven.com/files/"
+SCRIPT_VERSION = "hestia_render 2"
 
 # Surface look -> (Poly Haven texture, real size of one tile in meters). Looks not listed keep the USD color.
 TEXTURES = {
@@ -95,22 +103,110 @@ def arguments():
 # MARK: - Downloads
 
 
-def fetch(url, path):
-    if os.path.exists(path) and os.path.getsize(path) > 0:
-        return path
+class DownloadError(Exception):
+    pass
+
+
+ALLOWED_HOSTS = {"api.polyhaven.com", "dl.polyhaven.org"}
+METADATA_LIMIT = 4 * 1024 * 1024
+FILE_LIMIT = 96 * 1024 * 1024
+LICENSE_URL = "https://polyhaven.com/license"
+
+# Every asset file this render used, for the manifest written beside the picture.
+MANIFEST = []
+
+
+def checked_url(url):
+    """The URL, when it is HTTPS on a Poly Haven host; otherwise refused."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme != "https" or parts.hostname not in ALLOWED_HOSTS or parts.username or parts.password:
+        raise DownloadError("refused a download from outside Poly Haven: %r" % url)
+    return url
+
+
+def inside(root, *relative):
+    """A path under `root`, refusing absolute paths and any that climb out of it."""
+    base = os.path.realpath(root)
+    for piece in relative:
+        steps = piece.replace("\\", "/").split("/")
+        if not piece or os.path.isabs(piece) or piece.startswith(("/", "\\")) or "\x00" in piece or ".." in steps:
+            raise DownloadError("refused an unsafe cache path: %r" % (relative,))
+    path = os.path.realpath(os.path.join(base, *relative))
+    if os.path.commonpath([base, path]) != base or path == base:
+        raise DownloadError("refused a cache path outside the cache: %r" % (relative,))
+    return path
+
+
+def asset_name(asset):
+    if not asset or not all(char.isascii() and (char.isalnum() or char == "_") for char in asset):
+        raise DownloadError("refused an unexpected asset name: %r" % asset)
+    return asset
+
+
+def digests(path):
+    md5, sha = hashlib.md5(), hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            md5.update(chunk)
+            sha.update(chunk)
+    return md5.hexdigest(), sha.hexdigest()
+
+
+def download(url, path, limit, size=None, md5=None):
+    """Streams an allowlisted HTTPS file to `path`, checking the host after redirects, the byte ceiling, and the
+    declared size and MD5. A cached file is reused only when it still matches. Returns the path."""
+    checked_url(url)
+    if size is not None and size > limit:
+        raise DownloadError("%s declares %d bytes, over the %d-byte ceiling" % (url, size, limit))
+    if os.path.exists(path):
+        if size is None or (os.path.getsize(path) == size and (md5 is None or digests(path)[0] == md5)):
+            return path
+        os.remove(path)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    request = urllib.request.Request(url, headers={"User-Agent": "Hestia/0.1"})
-    with urllib.request.urlopen(request, timeout=120) as response, open(path + ".part", "wb") as out:
-        out.write(response.read())
-    os.replace(path + ".part", path)
+    partial = path + ".part"
+    try:
+        request = urllib.request.Request(url, headers={"User-Agent": "Hestia/0.1 (+https://github.com/P0GL0L/hestia)"})
+        with urllib.request.urlopen(request, timeout=120) as response, open(partial, "wb") as out:
+            checked_url(response.geturl())
+            written = 0
+            for chunk in iter(lambda: response.read(1 << 16), b""):
+                written += len(chunk)
+                if written > limit:
+                    raise DownloadError("%s is larger than %d bytes" % (url, limit))
+                out.write(chunk)
+        if size is not None and os.path.getsize(partial) != size:
+            raise DownloadError("%s arrived with %d bytes, not the declared %d" % (url, os.path.getsize(partial), size))
+        if md5 is not None and digests(partial)[0] != md5:
+            raise DownloadError("%s failed its MD5 check" % url)
+        os.replace(partial, path)
+        return path
+    finally:
+        if os.path.exists(partial):
+            os.remove(partial)
+
+
+def fetch(entry, cache, *relative, asset=""):
+    """A Poly Haven file entry (url, size, md5) downloaded into the cache at `relative`, recorded for the
+    manifest."""
+    url, size, md5 = entry["url"], entry.get("size"), entry.get("md5")
+    path = download(url, inside(cache, *relative), FILE_LIMIT, size, md5)
+    MANIFEST.append({"asset": asset, "url": url, "declaredSize": size, "declaredMD5": md5,
+                     "sha256": digests(path)[1], "license": LICENSE_URL})
     return path
 
 
 def files(asset, cache):
-    path = os.path.join(cache, "index", asset + ".json")
-    fetch(API + asset, path)
-    with open(path) as handle:
-        return json.load(handle)
+    """Poly Haven's file list for an asset, cached. It carries each file's URL, size, and MD5."""
+    asset = asset_name(asset)
+    path = inside(cache, "index", asset + ".json")
+    if not os.path.exists(path):
+        download(API + asset, path, METADATA_LIMIT)
+    try:
+        with open(path) as handle:
+            return json.load(handle)
+    except ValueError:
+        os.remove(path)
+        raise DownloadError("Poly Haven's file list for %s was not valid JSON" % asset)
 
 
 def texture_maps(asset, cache):
@@ -120,18 +216,36 @@ def texture_maps(asset, cache):
     for key, name in (("Diffuse", "diffuse"), ("nor_gl", "normal"), ("Rough", "rough")):
         if key in info and "1k" in info[key]:
             entry = info[key]["1k"].get("jpg") or info[key]["1k"].get("png")
-            url = entry["url"]
-            maps[name] = fetch(url, os.path.join(cache, "textures", asset, os.path.basename(url)))
+            leaf = os.path.basename(urllib.parse.urlsplit(entry["url"]).path)
+            maps[name] = fetch(entry, cache, "textures", asset, leaf, asset=asset)
     return maps
 
 
 def model_file(asset, cache):
     """The model's glTF at 1k with its buffers and textures, as a local path."""
     entry = files(asset, cache)["gltf"]["1k"]["gltf"]
-    folder = os.path.join(cache, "models", asset)
     for relative, include in entry.get("include", {}).items():
-        fetch(include["url"], os.path.join(folder, relative))
-    return fetch(entry["url"], os.path.join(folder, os.path.basename(entry["url"])))
+        pieces = relative.replace("\\", "/").split("/")
+        if any(piece in ("", ".", "..") for piece in pieces):
+            raise DownloadError("refused an unsafe model path: %r" % relative)
+        fetch(include, cache, "models", asset, *pieces, asset=asset)
+    leaf = os.path.basename(urllib.parse.urlsplit(entry["url"]).path)
+    return fetch(entry, cache, "models", asset, leaf, asset=asset)
+
+
+def write_manifest(args):
+    """What the picture was made from, beside it: every asset file, its source and license, and the versions."""
+    unique = {item["url"]: item for item in MANIFEST}
+    record = {
+        "picture": os.path.basename(args.out),
+        "script": SCRIPT_VERSION,
+        "blender": bpy.app.version_string,
+        "source": "Poly Haven (https://polyhaven.com), CC0",
+        "license": LICENSE_URL,
+        "assets": sorted(unique.values(), key=lambda item: item["url"]),
+    }
+    with open(os.path.splitext(args.out)[0] + ".manifest.json", "w") as handle:
+        json.dump(record, handle, indent=2)
 
 
 # MARK: - Scene
@@ -389,9 +503,10 @@ def light_world(cache, strength):
     background = nodes.get("Background") or nodes.new("ShaderNodeBackground")
     background.inputs["Strength"].default_value = strength
     try:
-        url = files(HDRI, cache)["hdri"]["2k"]["hdr"]["url"]
+        entry = files(HDRI, cache)["hdri"]["2k"]["hdr"]
+        leaf = os.path.basename(urllib.parse.urlsplit(entry["url"]).path)
         environment = nodes.new("ShaderNodeTexEnvironment")
-        environment.image = bpy.data.images.load(fetch(url, os.path.join(cache, "hdri", os.path.basename(url))))
+        environment.image = bpy.data.images.load(fetch(entry, cache, "hdri", leaf, asset=HDRI))
         links.new(environment.outputs["Color"], background.inputs["Color"])
     except Exception as error:
         print("Hestia: no sky image, using a plain sky", error)
@@ -524,6 +639,7 @@ def main():
         camera = exterior_camera()
     configure(args, camera)
     bpy.ops.render.render(write_still=True)
+    write_manifest(args)
     print("Hestia: wrote", args.out)
 
 
