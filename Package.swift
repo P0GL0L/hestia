@@ -93,8 +93,8 @@ let package = Package(
     ]
 )
 
-// HESTIA_PACKAGE_ONLY=1 leaves the app out, so `swift test` builds and runs only the library modules
-// and their tests. The macOS CI runner sets it because its Xcode differs from the one the app ships with.
+// HESTIA_PACKAGE_ONLY=1 leaves the app and its tests out, so `swift test` builds and runs only the library
+// modules and their tests. The macOS CI runner sets it because its Xcode differs from the one the app ships with.
 #if os(macOS)
 if ProcessInfo.processInfo.environment["HESTIA_PACKAGE_ONLY"] == nil {
     package.targets.append(
@@ -102,6 +102,17 @@ if ProcessInfo.processInfo.environment["HESTIA_PACKAGE_ONLY"] == nil {
             name: "HestiaApp",
             dependencies: ["ATContracts", "ATGeometry", "ATExchange", "ATDrawings"],
             path: "Apps/Hestia/Sources/HestiaApp"
+        )
+    )
+    package.targets.append(
+        .testTarget(
+            name: "HestiaAppTests",
+            dependencies: [
+                "HestiaApp",
+                "ATContracts",
+                .product(name: "Testing", package: "swift-testing"),
+            ],
+            path: "Apps/Hestia/Tests/HestiaAppTests"
         )
     )
 }

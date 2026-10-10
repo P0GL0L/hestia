@@ -2,8 +2,9 @@ import ATContracts
 import ATDrawings
 import Foundation
 
-/// What a terrain patch is, read from the start of its name: a patch named "Driveway" or "Driveway 2" is a
-/// driveway. A name that matches none is lawn.
+/// What a terrain patch is, read from its name: a patch named "Driveway" or "Driveway 2" is a driveway. Only the
+/// kind's own name, alone or followed by a number, counts, so "Lotus Garden" is not a lot. Any other name is
+/// lawn.
 enum SiteKind: String, CaseIterable, Sendable {
     case lot = "Lot"
     case lawn = "Lawn"
@@ -16,8 +17,21 @@ enum SiteKind: String, CaseIterable, Sendable {
     case gardenBed = "Garden bed"
 
     init(patchName name: String) {
-        let lowered = name.lowercased()
-        self = Self.allCases.first { lowered.hasPrefix($0.rawValue.lowercased()) } ?? .lawn
+        self = Self.exact(name) ?? .lawn
+    }
+
+    /// The kind a name was generated for: the kind's name alone, or followed by a space and a number.
+    static func exact(_ name: String) -> SiteKind? {
+        let trimmed = name.trimmingCharacters(in: .whitespaces).lowercased()
+        return allCases.first { kind in
+            let base = kind.rawValue.lowercased()
+            guard trimmed.hasPrefix(base) else { return false }
+            let rest = trimmed.dropFirst(base.count)
+            if rest.isEmpty { return true }
+            guard rest.first == " " else { return false }
+            let number = rest.dropFirst()
+            return !number.isEmpty && number.allSatisfy(\.isNumber)
+        }
     }
 
     var look: Look {

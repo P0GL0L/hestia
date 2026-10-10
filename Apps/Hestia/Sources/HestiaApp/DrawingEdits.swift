@@ -3,11 +3,13 @@ import Foundation
 
 /// The drawing tools' edits, in model space. Each is one undoable step.
 extension EditSession {
-    /// Adds a wall between two model points, each landing on the grid and then on a nearby wall end. Returns
-    /// where the wall ends, so the next wall of a chain can start there.
+    /// Adds a wall between two model points, each landing on the grid and then on a nearby wall end. An `exact`
+    /// wall, one whose length was typed, keeps both points as given: its start is a corner already placed, and
+    /// its end is where the typed length reaches. Returns where the wall ends, so the next wall of a chain can
+    /// start there.
     @discardableResult
-    mutating func addWall(from a: Point2, to b: Point2) throws -> Point2 {
-        let from = model.snappedWallEnd(a), to = model.snappedWallEnd(b)
+    mutating func addWall(from a: Point2, to b: Point2, exact: Bool = false) throws -> Point2 {
+        let from = exact ? a : model.snappedWallEnd(a), to = exact ? b : model.snappedWallEnd(b)
         guard from != to else {
             throw HestiaModel.LoadError(message: "Both ends snap to the same point. Click farther apart.")
         }
@@ -19,8 +21,10 @@ extension EditSession {
     /// step. A side that lies along a wall already drawn, within its length, uses that wall instead of a second
     /// one, so rooms drawn side by side share their walls. (A room's corners come from where its walls' lines
     /// cross, so a longer wall still gives the right corner.)
-    mutating func addRectangleRoom(from a: Point2, to b: Point2, named name: String) throws {
-        let corners = PlanGeometry.rectangle(model.snappedWallEnd(a), model.snappedWallEnd(b))
+    /// An `exact` room, one whose size was typed, keeps its corners as given.
+    mutating func addRectangleRoom(from a: Point2, to b: Point2, named name: String, exact: Bool = false) throws {
+        let corners = exact ? PlanGeometry.rectangle(a, b)
+            : PlanGeometry.rectangle(model.snappedWallEnd(a), model.snappedWallEnd(b))
         guard corners[0].x != corners[2].x, corners[0].y != corners[2].y else {
             throw HestiaModel.LoadError(message: "Drag out a rectangle with some width and depth.")
         }
@@ -48,19 +52,20 @@ extension EditSession {
             && PlanGeometry.distance(from: end, toSegment: wall.start, wall.end) <= 1
     }
 
-    /// Adds a rectangular terrain patch of a kind, named for it. A new lot replaces the old one.
-    mutating func addSitePatch(_ kind: SiteKind, from a: Point2, to b: Point2) throws {
-        let corners = PlanGeometry.rectangle(model.snapped(a), model.snapped(b))
+    /// Adds a rectangular terrain patch of a kind, named for it. A new lot replaces the old one: only patches
+    /// named exactly "Lot" or "Lot" and a number. An `exact` patch, one whose size was typed, keeps its corners.
+    mutating func addSitePatch(_ kind: SiteKind, from a: Point2, to b: Point2, exact: Bool = false) throws {
+        let corners = exact ? PlanGeometry.rectangle(a, b) : PlanGeometry.rectangle(model.snapped(a), model.snapped(b))
         guard corners[0].x != corners[2].x, corners[0].y != corners[2].y else {
             throw HestiaModel.LoadError(message: "Drag out a rectangle with some width and depth.")
         }
         var commands: [AnyCommand] = []
         if kind == .lot {
-            for patch in model.document.terrainPatches where SiteKind(patchName: patch.name) == .lot {
+            for patch in model.document.terrainPatches where SiteKind.exact(patch.name) == .lot {
                 commands.append(RemoveTerrainPatchCommand(terrainPatchID: patch.id).erased)
             }
         }
-        let same = model.document.terrainPatches.filter { SiteKind(patchName: $0.name) == kind }.count
+        let same = model.document.terrainPatches.filter { SiteKind.exact($0.name) == kind }.count
         let name = kind == .lot || same == 0 ? kind.rawValue : "\(kind.rawValue) \(same + 1)"
         commands.append(AddTerrainPatchCommand(terrainPatchID: TerrainPatchID(UUID()), name: name, boundary: corners,
                                                surveyPoints: []).erased)
@@ -106,7 +111,7 @@ extension EditSession {
         }
     }
 
-    /// Moves a terrain patch by a model offset, on the grid, as one step.
+    /// Moves a terrain patch and its survey points by a model offset, on the grid, as one step.
     mutating func movePatch(_ id: TerrainPatchID, dx: Int64, dy: Int64) throws {
         guard let index = model.document.terrainPatches.firstIndex(where: { $0.id == id }) else { return }
         let patch = model.document.terrainPatches[index]
@@ -117,9 +122,13 @@ extension EditSession {
         let boundary = patch.boundary.map {
             Point2(x: Length(ticks: $0.x.ticks + sx), y: Length(ticks: $0.y.ticks + sy))
         }
+        // Survey points move with the patch; their elevations are absolute and stay as they are.
+        let points = patch.surveyPoints.map {
+            Point3(x: Length(ticks: $0.x.ticks + sx), y: Length(ticks: $0.y.ticks + sy), z: $0.z)
+        }
         try perform(batch: [RemoveTerrainPatchCommand(terrainPatchID: id).erased,
                             AddTerrainPatchCommand(terrainPatchID: id, name: patch.name, boundary: boundary,
-                                                   surveyPoints: patch.surveyPoints, index: index).erased])
+                                                   surveyPoints: points, index: index).erased])
     }
 
     mutating func removeTerrainPatch(_ id: TerrainPatchID) throws {

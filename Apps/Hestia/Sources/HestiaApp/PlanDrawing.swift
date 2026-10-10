@@ -140,17 +140,6 @@ enum PlanGeometry {
         return Length(ticks: Int64((dx * dx + dy * dy).squareRoot().rounded()))
     }
 
-    /// `end`, moved so the line from `start` runs exactly along an axis when it is within `degrees` of one.
-    static func squared(from start: Point2, to end: Point2, degrees: Double = 5) -> Point2 {
-        let dx = Double(end.x.ticks - start.x.ticks), dy = Double(end.y.ticks - start.y.ticks)
-        guard dx != 0 || dy != 0 else { return end }
-        let angle = abs(atan2(dy, dx) * 180 / .pi)
-        let offAxis = min(angle, abs(180 - angle))
-        if offAxis <= degrees { return Point2(x: end.x, y: start.y) }
-        if abs(90 - angle) <= degrees { return Point2(x: start.x, y: end.y) }
-        return end
-    }
-
     /// The point `length` from `start` toward `toward`; east when the two are the same point.
     static func reach(from start: Point2, toward: Point2, length: Length) -> Point2 {
         var dx = Double(toward.x.ticks - start.x.ticks), dy = Double(toward.y.ticks - start.y.ticks)
@@ -202,13 +191,13 @@ enum LengthEntry {
         guard !trimmed.isEmpty else { return nil }
         let result: Length?
         if let value = number(trimmed, dropping: "mm") {
-            result = .millimeters(Int64(value.rounded()))
+            result = millimeters(value)
         } else if let value = number(trimmed, dropping: "cm") {
-            result = .millimeters(Int64((value * 10).rounded()))
+            result = millimeters(value * 10)
         } else if let value = number(trimmed, dropping: "m") {
-            result = .millimeters(Int64((value * 1000).rounded()))
+            result = millimeters(value * 1000)
         } else if let value = Double(trimmed) {
-            result = metric ? .millimeters(Int64((value * 1000).rounded())) : feet(value)
+            result = metric ? millimeters(value * 1000) : feet(value)
         } else {
             result = imperial(trimmed)
         }
@@ -227,6 +216,11 @@ enum LengthEntry {
     private static func number(_ text: String, dropping unit: String) -> Double? {
         guard text.hasSuffix(unit) else { return nil }
         return Double(text.dropLast(unit.count).trimmingCharacters(in: .whitespaces))
+    }
+
+    /// Millimetres to the model's tick, so a typed 3607.5 mm stays 3607.5 mm.
+    private static func millimeters(_ value: Double) -> Length {
+        Length(ticks: Int64((value * Double(Length.ticksPerMillimeter)).rounded()))
     }
 
     private static func feet(_ value: Double) -> Length {

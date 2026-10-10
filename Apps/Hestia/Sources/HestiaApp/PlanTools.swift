@@ -43,16 +43,13 @@ extension ContentView {
         }
     }
 
-    /// Where the current tool would put a point under the pointer: on the grid, then on a nearby wall end for
-    /// walls and rooms; a wall from the last corner runs square to an axis when it is close to one.
+    /// Where the current tool would put a point under the pointer: on the grid, then, for walls, rooms, and
+    /// stairs, on a nearby wall end. The direction from the last corner is never squared to an axis, so a
+    /// shallow diagonal stays the diagonal that was drawn.
     func target(_ raw: Point2, _ model: HestiaModel) -> Point2 {
         switch tool {
         case .wall, .room, .stair:
-            let point = model.snappedWallEnd(raw)
-            if let anchor, point == model.snapped(raw), tool == .wall {
-                return PlanGeometry.squared(from: anchor, to: point)
-            }
-            return point
+            return model.snappedWallEnd(raw)
         case .site, .furniture:
             return model.snapped(raw)
         default:
@@ -153,11 +150,12 @@ extension ContentView {
         addWallSegment(from: start, to: point)
     }
 
-    /// Adds a wall and carries on from its end; reaching the chain's first corner closes the outline.
-    private func addWallSegment(from start: Point2, to end: Point2) {
+    /// Adds a wall and carries on from its end; reaching the chain's first corner closes the outline. A typed
+    /// wall is `exact`: its end is not moved to the grid.
+    private func addWallSegment(from start: Point2, to end: Point2, exact: Bool = false) {
         guard var current = session else { return }
         do {
-            let reached = try current.addWall(from: start, to: end)
+            let reached = try current.addWall(from: start, to: end, exact: exact)
             session = current
             typed = ""
             let length = current.model.written(PlanGeometry.distance(start, reached))
@@ -182,10 +180,10 @@ extension ContentView {
 
     // MARK: - Rooms, site, furniture
 
-    private func addRoomBox(from a: Point2, to b: Point2) {
+    private func addRoomBox(from a: Point2, to b: Point2, exact: Bool = false) {
         guard var current = session else { return }
         do {
-            try current.addRectangleRoom(from: a, to: b, named: roomName)
+            try current.addRectangleRoom(from: a, to: b, named: roomName, exact: exact)
             session = current
             let size = PlanGeometry.rectangle(a, b)
             status = "Added \(roomName.isEmpty ? "Room" : roomName), "
@@ -197,10 +195,10 @@ extension ContentView {
         }
     }
 
-    private func addSiteBox(from a: Point2, to b: Point2) {
+    private func addSiteBox(from a: Point2, to b: Point2, exact: Bool = false) {
         guard var current = session else { return }
         do {
-            try current.addSitePatch(siteKind, from: a, to: b)
+            try current.addSitePatch(siteKind, from: a, to: b, exact: exact)
             session = current
             status = "Added the \(siteKind.rawValue.lowercased()). Undo removes it."
             typed = ""
@@ -360,7 +358,8 @@ extension ContentView {
                 status = "\u{201C}\(typed)\u{201D} is not a length. Try 12'6\" or 3.8 m."
                 return
             }
-            addWallSegment(from: start, to: PlanGeometry.reach(from: start, toward: toward, length: length))
+            let end = PlanGeometry.reach(from: start, toward: toward, length: length)
+            addWallSegment(from: start, to: end, exact: true)
             return
         }
         guard let size = LengthEntry.pair(typed, metric: metric) else {
@@ -369,7 +368,11 @@ extension ContentView {
         }
         let corner = PlanGeometry.corner(from: start, toward: toward, width: size.0, depth: size.1)
         anchor = nil
-        if tool == .room { addRoomBox(from: start, to: corner) } else { addSiteBox(from: start, to: corner) }
+        if tool == .room {
+            addRoomBox(from: start, to: corner, exact: true)
+        } else {
+            addSiteBox(from: start, to: corner, exact: true)
+        }
     }
 
     // MARK: - Preview
