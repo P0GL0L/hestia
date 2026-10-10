@@ -36,7 +36,7 @@ SCRIPT_VERSION = "hestia_render 3"
 
 # Surface look -> (Poly Haven texture, real size of one tile in meters). Looks not listed keep the USD color.
 TEXTURES = {
-    "wall": ("painted_plaster_wall", 2.0),
+    "wall": ("painted_plaster_wall", 3.0),
     "woodFloor": ("laminate_floor_02", 2.0),
     "tileFloor": ("floor_tiles_06", 1.5),
     "carpet": ("poly_wool_herringbone", 1.0),
@@ -77,10 +77,16 @@ MODELS = {
     "hestia.tree-shade": ("island_tree_01", "height", 0),
     "hestia.tree-ornamental": ("island_tree_01", "height", 240),
     "hestia.tree-pine": ("island_tree_01", "height", 120),
-    "hestia.shrub": ("fern_02", "height", 0),
+    "hestia.shrub": ("othonna_cerarioides", "height", 0),
 }
 
 HDRI = "kloofendal_48d_partly_cloudy_puresky"
+
+# Painted surfaces: their texture gives only relief and sheen; the color is the paint's.
+PAINT = {"wall": (0.82, 0.78, 0.71)}
+
+# Models already imported in this run, by Poly Haven name, shared by every placement that uses them.
+LOADED = {}
 
 # Color multipliers for textures that read too dry or too dark at house scale.
 TINTS = {"leafy_grass": (0.75, 1.05, 0.55)}
@@ -295,15 +301,20 @@ def flatten(objects):
         obj.parent = None
         obj.data.transform(world)
         obj.matrix_world = mathutils.Matrix.Identity(4)
+    # Bounding boxes are cached until the scene is evaluated again.
+    bpy.context.view_layer.update()
 
 
 def principled(material):
-    material.use_nodes = True
+    try:
+        material.use_nodes = True  # Always on from Blender 5; the property goes away in 6.
+    except AttributeError:
+        pass
     nodes = material.node_tree.nodes
     return next((node for node in nodes if node.type == "BSDF_PRINCIPLED"), None)
 
 
-def upgrade_material(material, asset, size, cache, tint=None):
+def upgrade_material(material, asset, size, cache, tint=None, paint=None):
     """Box-projected PBR textures in world meters on the material's Principled BSDF."""
     bsdf = principled(material)
     if bsdf is None:
@@ -325,7 +336,9 @@ def upgrade_material(material, asset, size, cache, tint=None):
         links.new(mapping.outputs["Vector"], node.inputs["Vector"])
         return node
 
-    if "diffuse" in maps:
+    if paint is not None:
+        bsdf.inputs["Base Color"].default_value = (*paint, 1.0)
+    elif "diffuse" in maps:
         color = image(maps["diffuse"], True).outputs["Color"]
         if tint:
             mix = nodes.new("ShaderNodeMix")
@@ -364,7 +377,11 @@ def tune_plain_materials():
         elif name == "metal":
             bsdf.inputs["Metallic"].default_value = 1.0
             bsdf.inputs["Roughness"].default_value = 0.3
-        elif name in ("fabricDark", "leather", "linen", "white", "porcelain"):
+        elif name == "linen":
+            bsdf.inputs["Base Color"].default_value = (0.62, 0.56, 0.47, 1)
+            bsdf.inputs["Roughness"].default_value = 0.9
+            bsdf.inputs["Sheen Weight"].default_value = 0.4
+        elif name in ("fabricDark", "leather", "white", "porcelain"):
             bsdf.inputs["Roughness"].default_value = 0.2 if name == "porcelain" else 0.7
             bsdf.inputs["Sheen Weight"].default_value = 0.3 if name in ("fabricDark", "linen") else 0.0
 
@@ -418,7 +435,7 @@ def load_model(asset, cache, loaded):
 def swap_items(cache):
     """Replaces stand-in furniture and trees with finished models of the same size and place. Each model is
     loaded once and placed as an instance, so five trees cost the memory of one."""
-    loaded = {}
+    loaded = LOADED
     # An item made of one part comes in as a single mesh object rather than an empty holding meshes.
     for empty in [obj for obj in bpy.data.objects if "hestia:catalogItem" in obj]:
         choice = MODELS.get(empty["hestia:catalogItem"])
@@ -532,57 +549,185 @@ def scatter_grass(cache, density):
         print("Hestia: grass on", target.name)
 
 
-def light_world(cache, strength):
+def light_world(cache, strength, sun_azimuth=150):
+    """The sky photo (HDRI) as the world, turned so the sun in the photo stands at `sun_azimuth` degrees
+    clockwise from north. Returns the photo sun's elevation in degrees, so the sun lamp can match it."""
     world = bpy.data.worlds.new("Sky")
     bpy.context.scene.world = world
-    world.use_nodes = True
+    try:
+        world.use_nodes = True  # Always on from Blender 5; the property goes away in 6.
+    except AttributeError:
+        pass
     nodes, links = world.node_tree.nodes, world.node_tree.links
     background = nodes.get("Background") or nodes.new("ShaderNodeBackground")
     background.inputs["Strength"].default_value = strength
+    output = nodes.get("World Output") or nodes.new("ShaderNodeOutputWorld")
+    links.new(background.outputs["Background"], output.inputs["Surface"])
     try:
         entry = files(HDRI, cache)["hdri"]["2k"]["hdr"]
         leaf = os.path.basename(urllib.parse.urlsplit(entry["url"]).path)
-        environment = nodes.new("ShaderNodeTexEnvironment")
-        environment.image = bpy.data.images.load(fetch(entry, cache, "hdri", leaf, asset=HDRI))
-        links.new(environment.outputs["Color"], background.inputs["Color"])
+        image = bpy.data.images.load(fetch(entry, cache, "hdri", leaf, asset=HDRI))
     except Exception as error:
         print("Hestia: no sky image, using a plain sky", error)
         background.inputs["Color"].default_value = (0.55, 0.7, 0.95, 1)
-    output = nodes.get("World Output") or nodes.new("ShaderNodeOutputWorld")
-    links.new(background.outputs["Background"], output.inputs["Surface"])
+        return 35
+    environment = nodes.new("ShaderNodeTexEnvironment")
+    environment.image = image
+    links.new(environment.outputs["Color"], background.inputs["Color"])
+    # Find the sun: the brightest pixel. Equirectangular u runs with atan2(y, -x); v with elevation.
+    import numpy
+    width, height = image.size
+    pixels = numpy.empty(width * height * 4, dtype=numpy.float32)
+    image.pixels.foreach_get(pixels)
+    brightest = int(numpy.argmax(pixels.reshape(-1, 4)[:, :3].sum(axis=1)))
+    u, v = (brightest % width + 0.5) / width, (brightest // width + 0.5) / height
+    phi = (u - 0.5) * 2 * math.pi
+    photo = math.atan2(math.sin(phi), -math.cos(phi))
+    az = math.radians(sun_azimuth)
+    wanted = math.atan2(math.cos(az), math.sin(az))
+    coords = nodes.new("ShaderNodeTexCoord")
+    mapping = nodes.new("ShaderNodeMapping")
+    mapping.inputs["Rotation"].default_value = (0, 0, photo - wanted)
+    links.new(coords.outputs["Generated"], mapping.inputs["Vector"])
+    links.new(mapping.outputs["Vector"], environment.inputs["Vector"])
+    return max(math.degrees((v - 0.5) * math.pi), 8)
 
 
-def tune_sun():
+def place_sun(azimuth=150, elevation=32):
+    """A warm late-afternoon sun from `azimuth` degrees (clockwise from north) and `elevation` above the
+    horizon, soft enough to read as daylight."""
+    sun = next((obj for obj in bpy.data.objects if obj.type == "LIGHT" and obj.data.type == "SUN"), None)
+    if sun is None:
+        sun = bpy.data.objects.new("Sun", bpy.data.lights.new("Sun", "SUN"))
+        bpy.context.scene.collection.objects.link(sun)
+    # The USD sun comes in under the stage's root, which turns y-up into z-up; aim it in world space instead.
+    sun.parent = None
+    sun.scale = (1, 1, 1)
+    sun.data.energy = 6.0
+    sun.data.angle = math.radians(1.2)
+    sun.data.color = (1.0, 0.9, 0.78)
+    az, el = math.radians(azimuth), math.radians(elevation)
+    toward_sun = mathutils.Vector((math.cos(el) * math.sin(az), math.cos(el) * math.cos(az), math.sin(el)))
+    sun.rotation_euler = (-toward_sun).to_track_quat("-Z", "Y").to_euler()
+    bpy.context.view_layer.update()
+    travel = sun.matrix_world.to_3x3().normalized() @ mathutils.Vector((0, 0, -1))
+    print("Hestia: sunlight travels", tuple(round(value, 2) for value in travel))
+
+
+def detail_building():
+    """Edges that catch light and a roof with real thickness at the eaves, so the house reads as built rather
+    than modeled."""
     for obj in bpy.data.objects:
-        if obj.type == "LIGHT" and obj.data.type == "SUN":
-            obj.data.energy = 4.0
-            obj.data.angle = math.radians(0.6)
+        if obj.type != "MESH" or obj.get("hestia_part") != "building":
+            continue
+        look = obj.name.split(".")[0]
+        if look == "roof":
+            solid = obj.modifiers.new("Eaves", "SOLIDIFY")
+            solid.thickness = 0.16
+            solid.offset = -1
+        if look in ("wall", "roof"):
+            bevel = obj.modifiers.new("Edges", "BEVEL")
+            bevel.width = 0.012
+            bevel.segments = 2
+            bevel.limit_method = "ANGLE"
+    bpy.context.view_layer.update()
+
+
+def background_trees(cache, count=16, seed=7):
+    """A seeded ring of trees 32 to 70 m from the middle of the building, so the house is not on an empty plain.
+    The ring is not tied to the lot: on a large lot some trees can stand inside it."""
+    import random
+    try:
+        collection, low, high = load_model("island_tree_01", cache, LOADED)
+    except Exception as error:
+        print("Hestia: no background trees", error)
+        return
+    house_low, house_high = building_bounds()
+    middle = (house_low + house_high) / 2
+    rng = random.Random(seed)
+    size = high - low
+    for index in range(count):
+        angle = rng.uniform(0, 2 * math.pi)
+        distance = rng.uniform(32, 70)
+        height = rng.uniform(7, 12)
+        scale = height / max(size.z, 1e-6)
+        tree = bpy.data.objects.new("Background tree %d" % index, None)
+        tree.instance_type = "COLLECTION"
+        tree.instance_collection = collection
+        bpy.context.scene.collection.objects.link(tree)
+        tree.matrix_world = (mathutils.Matrix.Translation((middle.x + distance * math.cos(angle),
+                                                           middle.y + distance * math.sin(angle), -0.05))
+                             @ mathutils.Matrix.Rotation(rng.uniform(0, 2 * math.pi), 4, "Z")
+                             @ mathutils.Matrix.Scale(scale, 4)
+                             @ mathutils.Matrix.Translation((-(low.x + high.x) / 2, -(low.y + high.y) / 2, -low.z)))
 
 
 def building_bounds():
+    """The building's world bounds as rendered: read from the evaluated meshes, so the eaves' thickness and
+    the bevels count when the cameras frame the house."""
+    depsgraph = bpy.context.evaluated_depsgraph_get()
     low = mathutils.Vector((1e9, 1e9, 1e9))
     high = -low
     for obj in bpy.data.objects:
         if obj.type == "MESH" and obj.get("hestia_part") == "building":
-            for corner in obj.bound_box:
-                point = obj.matrix_world @ mathutils.Vector(corner)
-                low = mathutils.Vector(map(min, low, point))
-                high = mathutils.Vector(map(max, high, point))
+            evaluated = obj.evaluated_get(depsgraph)
+            mesh = evaluated.to_mesh()
+            try:
+                for vertex in mesh.vertices:
+                    point = evaluated.matrix_world @ vertex.co
+                    low = mathutils.Vector(map(min, low, point))
+                    high = mathutils.Vector(map(max, high, point))
+            finally:
+                evaluated.to_mesh_clear()
     return low, high
 
 
+def level_camera(name, location, target, lens, shift_y=0.0):
+    """A camera held level, as an architectural photographer would, so verticals stay vertical; `shift_y`
+    raises the frame instead of tilting the camera."""
+    camera = bpy.data.objects.new(name, bpy.data.cameras.new(name))
+    bpy.context.scene.collection.objects.link(camera)
+    camera.data.lens = lens
+    camera.data.shift_y = shift_y
+    camera.location = location
+    heading = math.atan2(target[1] - location[1], target[0] - location[0])
+    camera.rotation_euler = (math.radians(90), 0, heading - math.radians(90))
+    return camera
+
+
 def exterior_camera():
-    """From the south-east at a person's height on a rise, the whole house in frame."""
+    """From a front corner at eye height, two-point perspective, the whole house and some garden in frame. Of
+    the south-east, south-west, and south views, it takes the one with the fewest placed items (a car, a tree)
+    between the camera and the house."""
     low, high = building_bounds()
     middle = (low + high) / 2
-    reach = max(high.x - low.x, high.y - low.y) * 1.25
-    camera = bpy.data.objects.new("Exterior", bpy.data.cameras.new("Exterior"))
-    bpy.context.scene.collection.objects.link(camera)
-    camera.data.lens = 32
-    camera.location = (middle.x + reach * 0.85, middle.y - reach * 1.15, 5.5)
-    target = mathutils.Vector((middle.x, middle.y, 1.6))
-    camera.rotation_euler = (target - camera.location).to_track_quat("-Z", "Y").to_euler()
-    return camera
+    reach = max(high.x - low.x, high.y - low.y)
+    candidates = [(middle.x + reach * 0.7, middle.y - reach * 0.95),
+                  (middle.x - reach * 0.7, middle.y - reach * 0.95),
+                  (middle.x, middle.y - reach * 1.15)]
+    # Placed items taller than a seated person, as plan points: low planting and rugs never block the view.
+    items = []
+    for obj in bpy.data.objects:
+        if "hestia:catalogItem" not in obj:
+            continue
+        parts = [part for part in list(obj.children_recursive) + [obj] if part.type == "MESH"]
+        top = max((max((part.matrix_world @ mathutils.Vector(corner)).z for corner in part.bound_box)
+                   for part in parts), default=0)
+        if top > 1.2:
+            items.append(mathutils.Vector((obj.matrix_world.translation.x, obj.matrix_world.translation.y)))
+
+    def blocked(spot):
+        """How much tall stuff stands between the spot and the house, nearer the camera counting more."""
+        start, end = mathutils.Vector((spot[0], spot[1])), mathutils.Vector((middle.x, middle.y))
+        score = 0.0
+        for item in items:
+            point, along = mathutils.geometry.intersect_point_line(item, start, end)
+            if 0.0 < along < 0.8 and (point - item).length < 3.5:
+                score += 1.0 - along
+        return score
+
+    spot = min(candidates, key=blocked)
+    return level_camera("Exterior", (spot[0], spot[1], 1.7), (middle.x, middle.y), lens=26, shift_y=0.04)
 
 
 def room_lights():
@@ -592,7 +737,7 @@ def room_lights():
         lamp = bpy.data.lights.new("Ceiling " + room["hestia:room"], "AREA")
         lamp.shape = "RECTANGLE"
         lamp.size, lamp.size_y = max(width * 0.5, 0.3), max(depth * 0.5, 0.3)
-        lamp.energy = 22 * width * depth
+        lamp.energy = 12 * width * depth
         lamp.color = (1.0, 0.9, 0.78)
         light = bpy.data.objects.new(lamp.name, lamp)
         light.location = room.matrix_world.translation - mathutils.Vector((0, 0, 0.06))
@@ -600,16 +745,45 @@ def room_lights():
 
 
 def interior_camera():
-    """At eye height in the south-west room, looking across the house toward the north-east."""
-    low, high = building_bounds()
-    camera = bpy.data.objects.new("Interior", bpy.data.cameras.new("Interior"))
-    bpy.context.scene.collection.objects.link(camera)
-    camera.data.lens = 20
-    camera.location = (low.x + 0.9, low.y + 0.9, 1.6)
-    target = mathutils.Vector((low.x + (high.x - low.x) * 0.45, low.y + (high.y - low.y) * 0.55, 1.2))
-    camera.rotation_euler = (target - camera.location).to_track_quat("-Z", "Y").to_euler()
+    """At seated eye height in a corner of the largest room, held level, looking across the room toward its
+    windows, so daylight comes into the picture."""
+    rooms = [obj for obj in bpy.data.objects if "hestia:room" in obj]
     room_lights()
-    return camera
+    if not rooms:
+        low, high = building_bounds()
+        location = (low.x + 0.8, low.y + 0.8, 1.35)
+        target = (low.x + (high.x - low.x) * 0.45, low.y + (high.y - low.y) * 0.6)
+        return level_camera("Interior", location, target, lens=17, shift_y=0.05)
+    def area(obj):
+        size = obj.get("hestia:size", (0, 0))
+        return float(size[0]) * float(size[1])
+
+    room = max(rooms, key=area)
+    width, depth = (float(value) * 0.3048 for value in room["hestia:size"])
+    middle = room.matrix_world.translation
+    glass = [obj.matrix_world @ polygon.center for obj in bpy.data.objects
+             if obj.type == "MESH" and obj.name.split(".")[0] == "glass" and not obj.hide_render
+             for polygon in obj.data.polygons]
+    # Only this room's own windows: glass within its outline, give or take a wall's thickness.
+    glass = [point for point in glass
+             if abs(point.x - middle.x) < width / 2 + 0.4 and abs(point.y - middle.y) < depth / 2 + 0.4]
+
+    def daylight(corner):
+        view = (mathutils.Vector((middle.x, middle.y)) - corner).normalized()
+        seen = 0
+        for point in glass:
+            offset = mathutils.Vector((point.x, point.y)) - corner
+            if offset.length < 12 and offset.length > 0.5 and offset.normalized().dot(view) > 0.64:
+                seen += 1
+        return seen
+
+    inset_x, inset_y = max(width / 2 - 0.7, 0.3), max(depth / 2 - 0.7, 0.3)
+    corners = [mathutils.Vector((middle.x + sx * inset_x, middle.y + sy * inset_y))
+               for sx in (-1, 1) for sy in (-1, 1)]
+    corner = max(corners, key=daylight)
+    print("Hestia: interior in", room["hestia:room"], "window light by corner", [daylight(spot) for spot in corners],
+          "glass faces", len(glass))
+    return level_camera("Interior", (corner.x, corner.y, 1.35), (middle.x, middle.y), lens=17, shift_y=-0.06)
 
 
 def configure(args, camera):
@@ -624,22 +798,25 @@ def configure(args, camera):
     scene.cycles.use_denoising = True
     scene.view_settings.view_transform = "AgX"
     scene.view_settings.look = "AgX - Medium High Contrast"
-    scene.view_settings.exposure = 0.3 if args.view == "interior" else 0.0
+    scene.view_settings.exposure = 0.0
     scene.render.image_settings.file_format = "PNG"
     scene.render.filepath = args.out
+    backend = "CPU"
     if args.device != "cpu":
         prefs = bpy.context.preferences.addons["cycles"].preferences
-        for backend in ("METAL", "OPTIX", "CUDA", "HIP", "ONEAPI"):
+        for candidate in ("METAL", "OPTIX", "CUDA", "HIP", "ONEAPI"):
             try:
-                prefs.compute_device_type = backend
+                prefs.compute_device_type = candidate
                 prefs.get_devices()
                 if any(device.type != "CPU" for device in prefs.devices):
                     for device in prefs.devices:
-                        device.use = True
+                        device.use = device.type != "CPU"
                     scene.cycles.device = "GPU"
+                    backend = candidate
                     break
-            except TypeError:
+            except Exception:
                 continue
+    print("Hestia: Blender", bpy.app.version_string, "rendering on", backend)
 
 
 def main():
@@ -658,15 +835,21 @@ def main():
             choice = TEXTURES.get(material.name.split(".")[0])
             if choice:
                 try:
-                    upgrade_material(material, choice[0], choice[1], args.cache, TINTS.get(choice[0]))
+                    look = material.name.split(".")[0]
+                    upgrade_material(material, choice[0], choice[1], args.cache, TINTS.get(choice[0]),
+                                     PAINT.get(look))
                 except Exception as error:
                     print("Hestia: kept the plain color for", material.name, error)
         swap_items(args.cache)
         if args.grass > 0:
             scatter_grass(args.cache, args.grass)
     tune_plain_materials()
-    tune_sun()
-    light_world(args.cache, 1.0 if args.view == "exterior" else 1.6)
+    detail_building()
+    elevation = light_world(args.cache, 0.55 if args.view == "exterior" else 1.0)
+    place_sun(elevation=elevation)
+    print("Hestia: sun elevation", round(elevation, 1))
+    if args.view == "exterior" and not args.no_assets:
+        background_trees(args.cache)
     if args.view == "interior":
         for obj in bpy.data.objects:
             if obj.type == "MESH" and obj.name.split(".")[0] == "roof":
