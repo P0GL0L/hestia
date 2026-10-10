@@ -4,13 +4,19 @@ Hestia draws the house live in its own 3D view. For pictures that look like phot
 
 ## Photo renders with Blender
 
-**Render Photo** makes a still of the house from outside or from the living room.
+**Render Photo** makes a still of the house from outside or from the largest room.
 
 1. Hestia exports the house as OpenUSD (`HouseUSD.swift`).
 2. It runs Blender in the background with `tools/blender/hestia_render.py`.
 3. The script replaces each flat color with a CC0 PBR material from Poly Haven, such as laminate, tile, plaster, roof tiles, lawn, paving, or marble.
 4. It replaces the simple stand-in furniture and trees with CC0 Poly Haven models of the same size and place, and lights the scene with a real sky (HDRI), a sun, and a ceiling light in each room.
-5. Cycles renders it, using the GPU through Metal on Apple silicon.
+5. The pictures are composed as an architectural photographer would. The camera is held level, so walls stay vertical, and it is set at eye height.
+   - **Outside:** it tries three front viewpoints (south-east, south-west, and south) and takes the one with the fewest tall placed items, such as cars and trees, between it and the house. It does not search for the clearest view overall.
+   - **Inside:** it stands in a corner of the largest room and looks toward that room's windows.
+   - **Light:** when the sky photo (HDRI) loads, the renderer estimates its sun from the brightest point and turns the sky so that estimate matches the sun lamp. If it cannot be loaded, the scene falls back to a plain blue sky.
+   - **Building detail:** the roof gets thickness at the eaves and the walls and roof get bevelled edges. Framing uses the house's size after this detail is added.
+   - **Trees:** a seeded ring of trees stands around the building, 32 to 70 m from its middle. On a large lot they can stand inside it.
+6. Cycles renders it on the GPU through Metal when Blender finds a Metal device, and on the CPU otherwise.
 
 The picture is saved in `~/Hestia-exports` and opened.
 
