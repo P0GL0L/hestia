@@ -10,14 +10,14 @@ private func length(_ feet: Double) -> Length {
 
 /// The parts of one opening of `kind`, `width` by `height` feet, in a 30-foot wall.
 private func pieces(_ kind: OpeningKind, width: Double, height: Double,
-                    sill: Double = 0) throws -> [OpeningDetail.Piece] {
+                    sill: Double = 0, swing: DoorSwing? = nil) throws -> [OpeningDetail.Piece] {
     var session = EditSession(model: try HestiaModel.blank())
     try session.addWall(from: PlanOverlay.point(0, 0), to: PlanOverlay.point(30, 0))
     var document = session.model.document
     let wall = try #require(document.walls.first)
     document.openings = [Opening(id: OpeningID(UUID()), wallID: wall.id, offsetAlongWall: length(10),
                                  width: length(width), height: length(height), sillHeight: length(sill),
-                                 kind: kind)]
+                                 kind: kind, swing: swing)]
     let details = OpeningDetail.details(document)
     #expect(details.count == 1)
     return details.first?.pieces ?? []
@@ -41,7 +41,9 @@ private func intersect(_ a: OpeningDetail.Piece, _ b: OpeningDetail.Piece) -> Bo
 @Suite("Door and window detail")
 struct OpeningDetailTests {
     static let sizes = [0.03, 0.05, 0.21, 0.32, 0.33, 0.47, 0.48, 3, 7]
-    static let kinds: [OpeningKind] = [.window, .singleDoor, .doubleDoor, .slidingDoor, .garageDoor, .casedOpening]
+    static let kinds: [OpeningKind] = [.window, .singleDoor, .doubleDoor, .slidingDoor, .foldingDoor, .pocketDoor,
+                                       .garageDoor, .casedOpening]
+    static let doors: [OpeningKind] = [.singleDoor, .doubleDoor, .slidingDoor, .foldingDoor, .pocketDoor, .garageDoor]
 
     @Test("Every part of any valid opening has a positive size, and no two parts overlap",
           arguments: kinds)
@@ -93,8 +95,141 @@ struct OpeningDetailTests {
         #expect(door.filter { $0.part == .handle }.count == 2)
         let double = try pieces(.doubleDoor, width: 5, height: 6.67)
         #expect(double.filter { $0.part == .leaf }.count == 2)
+        for kind in [OpeningKind.slidingDoor, .foldingDoor] {
+            let operable = try pieces(kind, width: 5, height: 6.67)
+            #expect(operable.contains { $0.part == .handle }, "\(kind) keeps a usable handle while open")
+        }
         let garage = try pieces(.garageDoor, width: 9, height: 7)
         #expect(!garage.contains { $0.part == .handle })
+    }
+
+    @Test("Every door stands open: nothing of it is in the way of a walk through its open width",
+          arguments: doors)
+    func doorsStandOpen(kind: OpeningKind) throws {
+        let (width, height) = kind == .garageDoor ? (9.0, 7.0) : (3.0, 6.67)
+        let swings = DoorSwing.Hinge.allCases.flatMap { hinge in
+            DoorSwing.Side.allCases.map { DoorSwing(hinge: hinge, opensToward: $0) }
+        }
+        for swing in swings {
+            let parts = try pieces(kind, width: width, height: height, swing: swing)
+            // A foot-wide path through the wall and two feet past each face, up to six feet: through the middle,
+            // or for a sliding door the middle of the half its panels leave open.
+            let clear = OpeningDetail.liner + OpeningDetail.gap
+            let open = kind == .slidingDoor ? 10 + width - clear - (width - 2 * clear - OpeningDetail.gap) / 4
+                : 10 + width / 2
+            let path = OpeningDetail.Piece(part: .leaf, look: .door, along: open, across: 0, z0: 0, length: 1,
+                                           depth: 4.5, tall: 6)
+            for part in parts where part.part == .leaf || part.part == .handle {
+                #expect(!intersect(part, path), "\(kind) \(swing): \(part) is in the way")
+            }
+            let leaves = parts.filter { $0.part == .leaf }
+            #expect(leaves.count == (kind == .pocketDoor ? 0 : [.doubleDoor, .slidingDoor, .foldingDoor]
+                .contains(kind) ? 2 : 1), "\(kind)")
+        }
+    }
+
+    @Test("A hinged leaf stands square to the wall against its hinge jamb, out on the side it swings to")
+    func hingedLeafFollowsItsSwing() throws {
+        let thickness = 0.5 // The wall a blank model draws, six inches.
+        for hinge in DoorSwing.Hinge.allCases {
+            for side in DoorSwing.Side.allCases {
+                let parts = try pieces(.singleDoor, width: 3, height: 6.67,
+                                       swing: DoorSwing(hinge: hinge, opensToward: side))
+                let leaf = try #require(parts.first { $0.part == .leaf })
+                let jamb = hinge == .nearStart ? 10 + OpeningDetail.liner + OpeningDetail.gap
+                    : 13 - OpeningDetail.liner - OpeningDetail.gap
+                let toward: Double = hinge == .nearStart ? 1 : -1
+                #expect(abs(leaf.along - (jamb + toward * OpeningDetail.leafThickness / 2)) < 1e-9)
+                #expect(abs(leaf.length - OpeningDetail.leafThickness) < 1e-9)
+                let out: Double = side == .left ? 1 : -1
+                // From the wall's face out the leaf's own width.
+                #expect(abs(leaf.across - out * (thickness / 2 + leaf.depth / 2)) < 0.01, "\(hinge) \(side)")
+                #expect(abs(leaf.depth - (3 - 2 * (OpeningDetail.liner + OpeningDetail.gap))) < 1e-9)
+                let handles = parts.filter { $0.part == .handle }
+                #expect(handles.count == 2)
+                #expect(handles.allSatisfy { $0.across * out > thickness / 2 })
+            }
+        }
+    }
+
+    @Test("A door with no recorded swing opens into the building")
+    func unrecordedSwingOpensInward() throws {
+        var session = EditSession(model: try HestiaModel.blank())
+        try session.addRectangleRoom(from: PlanOverlay.point(0, 0), to: PlanOverlay.point(16, 12), named: "Room")
+        var document = session.model.document
+        for wall in document.walls {
+            document.openings.append(Opening(id: OpeningID(UUID()), wallID: wall.id, offsetAlongWall: length(4),
+                                             width: length(3), height: length(6.67), sillHeight: length(0),
+                                             kind: .singleDoor))
+        }
+        let details = OpeningDetail.details(document)
+        #expect(details.count == 4)
+        for (frame, parts) in details {
+            let leaf = try #require(parts.first { $0.part == .leaf })
+            let middle = frame.point(leaf.along, leaf.across)
+            #expect(middle.x > 0 && middle.x < 16 && middle.y > 0 && middle.y < 12, "\(middle) is outside")
+        }
+    }
+
+    @Test("A walk goes through an open door both ways but not through its leaf")
+    func walkRoundTheLeaf() throws {
+        var session = EditSession(model: try HestiaModel.blank())
+        try session.addWall(from: PlanOverlay.point(0, 0), to: PlanOverlay.point(30, 0))
+        var document = session.model.document
+        let wall = try #require(document.walls.first)
+        document.openings = [Opening(id: OpeningID(UUID()), wallID: wall.id, offsetAlongWall: length(10),
+                                     width: length(3), height: length(6.67), sillHeight: length(0),
+                                     kind: .singleDoor, swing: DoorSwing(hinge: .nearStart, opensToward: .left))]
+        let barriers = WalkBarriers(document: document, storey: wall.storeyID)
+        func walk(from start: (Double, Double), heading: Double) -> Walker {
+            var walker = Walker(x: start.0, y: start.1, floor: 0)
+            walker.heading = heading
+            for _ in 0..<60 { walker.step(WalkInput(forward: 1), seconds: 0.05, barriers: barriers) }
+            return walker
+        }
+        // Straight through the middle, in and out.
+        #expect(walk(from: (11.5, -4), heading: 0).y > 2)
+        #expect(walk(from: (11.5, 4), heading: .pi).y < -2)
+        // Along the wall on the swing side, a foot and a half out: the leaf stands there.
+        #expect(walk(from: (6, 1.5), heading: .pi / 2).x < 10)
+        #expect(walk(from: (15, 1.5), heading: -.pi / 2).x > 11)
+        // The same walk on the other side has nothing in the way.
+        #expect(walk(from: (6, -1.5), heading: .pi / 2).x > 14)
+    }
+
+    @Test("A walk collides only with door leaves on its own storey")
+    func walkLeafBarriersStayOnStorey() throws {
+        var session = EditSession(model: try HestiaModel.blank())
+        try session.addWall(from: PlanOverlay.point(0, 0), to: PlanOverlay.point(30, 0))
+        var document = session.model.document
+        let groundWall = try #require(document.walls.first)
+        document.openings = [Opening(id: OpeningID(UUID()), wallID: groundWall.id, offsetAlongWall: length(10),
+                                     width: length(3), height: length(6.67), sillHeight: length(0),
+                                     kind: .singleDoor,
+                                     swing: DoorSwing(hinge: .nearStart, opensToward: .left))]
+
+        let ground = try #require(document.storeys.first { $0.id == groundWall.storeyID })
+        let upperID = StoreyID(UUID())
+        document.storeys.append(Storey(id: upperID, buildingID: ground.buildingID, name: "Upper",
+                                       elevation: length(10)))
+        var upperWall = groundWall
+        upperWall.id = WallID(UUID())
+        upperWall.storeyID = upperID
+        document.walls.append(upperWall)
+        document.openings.append(Opening(id: OpeningID(UUID()), wallID: upperWall.id,
+                                         offsetAlongWall: length(10), width: length(3), height: length(6.67),
+                                         sillHeight: length(0), kind: .singleDoor,
+                                         swing: DoorSwing(hinge: .nearStart, opensToward: .right)))
+
+        let barriers = WalkBarriers(document: document, storey: groundWall.storeyID)
+        func walk(from start: (Double, Double), heading: Double) -> Walker {
+            var walker = Walker(x: start.0, y: start.1, floor: 0)
+            walker.heading = heading
+            for _ in 0..<60 { walker.step(WalkInput(forward: 1), seconds: 0.05, barriers: barriers) }
+            return walker
+        }
+        #expect(walk(from: (6, 1.5), heading: .pi / 2).x < 10, "the ground-floor leaf blocks its swing side")
+        #expect(walk(from: (6, -1.5), heading: .pi / 2).x > 14, "the upper-storey leaf does not leak downstairs")
     }
 }
 

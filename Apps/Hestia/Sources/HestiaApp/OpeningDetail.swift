@@ -2,8 +2,8 @@ import ATContracts
 import Foundation
 
 /// Doors and windows built as a carpenter would show them, in place of the engine's flat panes: painted casing
-/// around every opening, a solid door leaf with a handle, and windows with a frame, a meeting rail, glass with
-/// thickness, and a sill. All sizes are in feet and come from the opening and its wall.
+/// around every opening, a solid door leaf with a handle, standing open, and windows with a frame, a meeting
+/// rail, glass with thickness, and a sill. All sizes are in feet and come from the opening and its wall.
 ///
 /// Every part is first worked out as a `Piece` in the opening's own frame, and a part is only made when it fits:
 /// a very small opening keeps its casing and drops the detail that has no room, so no part ever has a negative
@@ -91,22 +91,72 @@ enum OpeningDetail {
         }
     }
 
-    /// Every opening in the document whose wall is there, with its parts.
-    static func details(_ document: ModelDocument) -> [(frame: Frame, pieces: [Piece])] {
+    /// Every opening in the document whose wall is there, with its parts; only the storey's when one is given.
+    static func details(_ document: ModelDocument, storey: StoreyID? = nil) -> [(frame: Frame, pieces: [Piece])] {
         let walls = Dictionary(document.walls.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return document.openings.compactMap { opening in
-            guard let wall = walls[opening.wallID] else { return nil }
+            guard let wall = walls[opening.wallID], storey == nil || wall.storeyID == storey else { return nil }
             let floor = document.storeys.first { $0.id == wall.storeyID }.map { HouseScene.feet($0.elevation) } ?? 0
             let frame = Frame(wall: wall, opening: opening, floor: floor)
-            return (frame, pieces(frame, kind: opening.kind))
+            let swing = opening.swing ?? defaultSwing(document, wall: wall, opening: opening)
+            return (frame, pieces(frame, kind: opening.kind, swing: swing))
         }
     }
 
-    /// The parts of one opening of the given kind.
-    static func pieces(_ frame: Frame, kind: OpeningKind) -> [Piece] {
+    /// The way a door with no recorded swing opens: into the building, the side whose floor reaches a foot past
+    /// the wall's face (the box of the storey's walls when it has no slab), hinged at the wall's start; left
+    /// when that does not tell the sides apart.
+    static func defaultSwing(_ document: ModelDocument, wall: Wall, opening: Opening) -> DoorSwing {
+        let sx = Double(wall.start.x.ticks), sy = Double(wall.start.y.ticks)
+        let dx = Double(wall.end.x.ticks) - sx, dy = Double(wall.end.y.ticks) - sy
+        let length = max((dx * dx + dy * dy).squareRoot(), 1e-9)
+        let (ux, uy) = (dx / length, dy / length)
+        let along = Double(opening.offsetAlongWall.ticks) + Double(opening.width.ticks) / 2
+        let reach = Double(wall.thickness.ticks) / 2 + Double(Length.feet(1).ticks)
+        func point(_ side: Double) -> Point2 {
+            Point2(x: Length(ticks: Int64((sx + ux * along - uy * side * reach).rounded())),
+                   y: Length(ticks: Int64((sy + uy * along + ux * side * reach).rounded())))
+        }
+        let slabs = document.slabs.filter { $0.storeyID == wall.storeyID }
+        let inside: (Point2) -> Bool
+        if slabs.isEmpty {
+            let ends: [Point2] = document.walls.filter { $0.storeyID == wall.storeyID }.flatMap { [$0.start, $0.end] }
+            let xs: [Int64] = ends.map(\.x.ticks), ys: [Int64] = ends.map(\.y.ticks)
+            let (x0, x1, y0, y1) = (xs.min() ?? 0, xs.max() ?? 0, ys.min() ?? 0, ys.max() ?? 0)
+            inside = { $0.x.ticks > x0 && $0.x.ticks < x1 && $0.y.ticks > y0 && $0.y.ticks < y1 }
+        } else {
+            inside = { point in slabs.contains { HestiaModel.contains($0.outline, point) } }
+        }
+        let right = inside(point(-1)) && !inside(point(1))
+        return DoorSwing(hinge: .nearStart, opensToward: right ? .right : .left)
+    }
+
+    /// The standing door leaves of the storey's doors as walls a walker cannot pass through, each where it
+    /// stands open, so a walk goes round a leaf and never through it.
+    static func leafBarriers(_ document: ModelDocument, storey: StoreyID) -> [WalkBarriers.Segment] {
+        var segments: [WalkBarriers.Segment] = []
+        for (frame, pieces) in details(document, storey: storey) {
+            for piece in pieces where piece.part == .leaf && piece.tall > max(piece.length, piece.depth) {
+                // Through the leaf's middle along its longer side in plan, as thick as its shorter side.
+                let lengthwise = piece.length >= piece.depth
+                let reach = max(piece.length, piece.depth) / 2
+                let a = lengthwise ? frame.point(piece.along - reach, piece.across)
+                    : frame.point(piece.along, piece.across - reach)
+                let b = lengthwise ? frame.point(piece.along + reach, piece.across)
+                    : frame.point(piece.along, piece.across + reach)
+                segments.append(WalkBarriers.Segment(ax: a.x, ay: a.y, bx: b.x, by: b.y,
+                                                     half: min(piece.length, piece.depth) / 2))
+            }
+        }
+        return segments
+    }
+
+    /// The parts of one opening of the given kind, a door standing open the way `swing` says.
+    static func pieces(_ frame: Frame, kind: OpeningKind,
+                       swing: DoorSwing = DoorSwing(hinge: .nearStart, opensToward: .left)) -> [Piece] {
         guard frame.width > 0, frame.height > 0 else { return [] }
         if kind.isDoor {
-            return trim(frame) + door(frame, kind: kind)
+            return trim(frame) + door(frame, kind: kind, swing: swing)
         } else if kind == .casedOpening {
             return trim(frame)
         }
@@ -202,27 +252,88 @@ enum OpeningDetail {
         return pieces
     }
 
-    /// A leaf with a slight gap all round, split in two for double, sliding, and folding doors when both halves
-    /// fit, and a handle on both faces when the leaf is wide and tall enough. A garage door has no handle.
-    private static func door(_ frame: Frame, kind: OpeningKind) -> [Piece] {
+    /// The door as it stands open, so a walk through it never meets the leaf: a hinged leaf turned square to the
+    /// wall on its swing side against its hinge jamb (a double door's two leaves, one at each jamb); a folding
+    /// door's halves folded up at the jambs; a sliding door's moving panel slid over its fixed one; a pocket door
+    /// away in its pocket inside the wall; a garage door raised flat under the head on its swing side. Every leaf
+    /// keeps a slight gap from the liners; a door too narrow to split has a single leaf, and one too narrow
+    /// for even that turned open keeps its leaf shut.
+    private static func door(_ frame: Frame, kind: OpeningKind, swing: DoorSwing) -> [Piece] {
         let clear = frame.inset + gap
         let width = frame.width - 2 * clear
         let tall = frame.height - frame.inset - gap - 0.02
         guard width >= least, tall >= least else { return [] }
-        let split = kind == .doubleDoor || kind == .slidingDoor || kind == .foldingDoor
-        let panels = split && (width - gap) / 2 >= least ? 2 : 1
-        let each = (width - Double(panels - 1) * gap) / Double(panels)
-        var pieces = (0..<panels).map { panel in
-            Piece(part: .leaf, look: .door, along: frame.start + clear + (each + gap) * Double(panel) + each / 2,
-                  z0: frame.sill + 0.02, length: each, depth: leafThickness, tall: tall)
+        let open = Opened(z0: frame.sill + 0.02, tall: tall, side: swing.opensToward == .left ? 1 : -1,
+                          face: frame.wallThickness / 2)
+        let near = frame.start + clear, far = frame.start + frame.width - clear
+        let each = (width - gap) / 2
+        let thick = kind == .foldingDoor ? 2 * leafThickness : leafThickness
+        // A doorway too narrow for its leaves turned open keeps them shut in the wall: no walk fits through it.
+        if kind != .pocketDoor, kind == .slidingDoor ? each < least : thick > width {
+            return [Piece(part: .leaf, look: .door, along: frame.middle, z0: open.z0, length: width,
+                          depth: leafThickness, tall: tall)]
         }
+        let pair = each >= least && 2 * thick + gap <= width
+        switch kind {
+        case .pocketDoor:
+            return []
+        case .garageDoor:
+            return [Piece(part: .leaf, look: .door, along: frame.middle, across: open.side * (open.face + tall / 2),
+                          z0: open.z0 + tall - leafThickness, length: width, depth: tall, tall: leafThickness)]
+        case .slidingDoor:
+            // Both panels over the start half, in tracks either side of the centerline.
+            let track = (leafThickness + gap) / 2
+            var pieces = [-track, track].map {
+                Piece(part: .leaf, look: .door, along: near + each / 2, across: $0, z0: open.z0, length: each,
+                      depth: leafThickness, tall: tall)
+            }
+            let knob = 0.2
+            if each >= handleRoom, tall >= 2 * knob {
+                let along = near + each - 0.25
+                let height = min(3, tall / 2) - knob / 2
+                let outside = track + (leafThickness + knob) / 2
+                for face in [-1.0, 1.0] {
+                    pieces.append(Piece(part: .handle, look: .metal, along: along, across: face * outside,
+                                        z0: open.z0 + height, length: knob, depth: knob, tall: knob))
+                }
+            }
+            return pieces
+        case .doubleDoor where pair, .foldingDoor where pair:
+            let folded = kind == .foldingDoor
+            return leaf(hinge: near, toward: 1, width: each, folded: folded, open)
+                + leaf(hinge: far, toward: -1, width: each, folded: folded, open)
+        default:
+            let atStart = swing.hinge == .nearStart
+            return leaf(hinge: atStart ? near : far, toward: atStart ? 1 : -1, width: width,
+                        folded: kind == .foldingDoor, open)
+        }
+    }
+
+    /// How a door's leaves stand open: from `z0`, `tall` high, out from the wall's `face` (half its thickness)
+    /// on `side` (1 left of the wall's direction, -1 right).
+    private struct Opened {
+        var z0: Double
+        var tall: Double
+        var side: Double
+        var face: Double
+    }
+
+    /// One leaf `width` wide turned open square to the wall: standing `toward` the opening from its `hinge`
+    /// and reaching out from the wall's face; folded in half, twice as thick and half as far out, for a folding
+    /// door. A leaf wide and tall enough has a handle on both faces near its free edge.
+    private static func leaf(hinge: Double, toward: Double, width: Double, folded: Bool, _ open: Opened) -> [Piece] {
+        let thick = folded ? 2 * leafThickness : leafThickness
+        let out = folded ? width / 2 : width
+        let along = hinge + toward * thick / 2
+        var pieces = [Piece(part: .leaf, look: .door, along: along, across: open.side * (open.face + out / 2),
+                            z0: open.z0, length: thick, depth: out, tall: open.tall)]
         let knob = 0.2
-        guard kind != .garageDoor, each >= handleRoom, tall >= 2 * knob else { return pieces }
-        let along = frame.start + frame.width - clear - 0.25
-        let height = min(3, tall / 2) - knob / 2
-        for side in [-1.0, 1.0] {
-            pieces.append(Piece(part: .handle, look: .metal, along: along, across: side * (leafThickness + knob) / 2,
-                                z0: frame.sill + 0.02 + height, length: knob, depth: knob, tall: knob))
+        guard width >= handleRoom, open.tall >= 2 * knob else { return pieces }
+        let height = min(3, open.tall / 2) - knob / 2
+        let across = open.side * (open.face + out - 0.25)
+        for faceSide in [-1.0, 1.0] {
+            pieces.append(Piece(part: .handle, look: .metal, along: along + faceSide * (thick + knob) / 2,
+                                across: across, z0: open.z0 + height, length: knob, depth: knob, tall: knob))
         }
         return pieces
     }
