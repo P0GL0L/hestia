@@ -321,10 +321,10 @@ struct ContentView: View {
                 Toggle("Roof", isOn: $showRoof)
                     .fixedSize()
                 // Zoom for the orbiting view; the scroll wheel and a trackpad pinch zoom too.
-                Button("\u{2212}") { houseZoom -= 1 }
+                Button("\u{2212}") { houseZoom = HouseZoom.pressed(houseZoom, by: -1) }
                     .keyboardShortcut("-", modifiers: .command)
                     .disabled(houseMode == .walk)
-                Button("+") { houseZoom += 1 }
+                Button("+") { houseZoom = HouseZoom.pressed(houseZoom, by: 1) }
                     .keyboardShortcut("=", modifiers: .command)
                     .disabled(houseMode == .walk)
                 Spacer(minLength: 0)

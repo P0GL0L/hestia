@@ -290,7 +290,7 @@ final class HouseSCNView: SCNView {
     }
 
     /// How much one zoom step or wheel notch moves the orbiting camera toward its target.
-    static let zoomStep = 0.8
+    static let zoomStep = HouseZoom.step
 
     /// Moves the orbiting camera along its line to what it turns around, to `factor` times the distance, never
     /// closer than 3 feet or farther than 3,000.
@@ -305,14 +305,21 @@ final class HouseSCNView: SCNView {
     }
 
     /// A mouse wheel zooms the orbiting view; with Option held, and on a trackpad, scrolling keeps SceneKit's
-    /// own handling, and pinching zooms.
+    /// own handling, and pinching zooms. While walking, no wheel or trackpad input reaches SceneKit (`HouseZoom`).
     override func scrollWheel(with event: NSEvent) {
-        guard walker == nil, !event.hasPreciseScrollingDeltas, !event.modifierFlags.contains(.option),
-              event.scrollingDeltaY != 0 else {
-            super.scrollWheel(with: event)
-            return
+        switch HouseZoom.wheel(walking: walker != nil, precise: event.hasPreciseScrollingDeltas,
+                               option: event.modifierFlags.contains(.option),
+                               deltaY: Double(event.scrollingDeltaY)) {
+        case .ignore: return
+        case let .zoom(factor): zoom(by: factor)
+        case .sceneKit: super.scrollWheel(with: event)
         }
-        zoom(by: event.scrollingDeltaY > 0 ? Self.zoomStep : 1 / Self.zoomStep)
+    }
+
+    /// A pinch zooms the orbiting view through SceneKit; while walking it is consumed.
+    override func magnify(with event: NSEvent) {
+        guard HouseZoom.pinch(walking: walker != nil) == .sceneKit else { return }
+        super.magnify(with: event)
     }
 
     func stopWalking() {
