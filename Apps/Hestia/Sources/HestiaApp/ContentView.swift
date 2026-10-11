@@ -315,7 +315,8 @@ struct ContentView: View {
                 Spacer(minLength: 0)
             }
             ZStack(alignment: .bottom) {
-                HouseView(scene: model.house, sessionID: sessionID, mode: houseMode, showRoof: showRoof,
+                HouseView(scene: model.house, document: model.document, meshes: model.meshes, sessionID: sessionID,
+                          mode: houseMode, showRoof: showRoof,
                           walkStart: Walker.start(in: model.document, storey: model.groundStorey),
                           barriers: WalkBarriers(document: model.document, storey: model.groundStorey),
                           onLeaveWalk: {

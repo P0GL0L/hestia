@@ -1,6 +1,39 @@
 # Rendering and other 3D tools
 
-Hestia draws the house live in its own 3D view. For pictures that look like photographs, and for other 3D programs, it hands the house over as OpenUSD.
+Hestia draws the house live in its own 3D view, finished from an asset library built ahead of time. For still pictures it renders with Blender, and for other 3D programs it hands the house over as OpenUSD.
+
+## The live 3D view and the asset library
+
+The live view is finished from an **asset library**: materials, furniture and planting models, and a sky, prepared once with Blender. While you draw, orbit, and walk, the view only places copies of what the library already holds, so nothing is modeled or converted while you work.
+
+- **Building the library.** `tools/blender/hestia_library.py` reads the same tables as the photo renderer (textures, models, sky). It fetches the assets through the renderer's checked downloader, then writes the library folder:
+  - `library.json`: what the library holds and how to use it.
+  - `surfaces/`: diffuse, normal (OpenGL), and roughness maps for each surface material.
+  - `models/`: one USDZ per model, y up, in meters, footprint centered on the origin, standing on y = 0, with its front toward +z.
+  - `sky/sky.png`: the sky photo, tone-mapped and laid out as SceneKit reads an equirectangular image (north three quarters across, measured on Metal). The sun is found as the brightest point of the HDR photo, where it stands far above any cloud (a photo without such a peak is refused), and the sky is turned so the sun stands at a known bearing for the view's sun lamp.
+  - `CREDITS.txt`: every asset comes from Poly Haven and is CC0, so the library can ship inside the app.
+- **Ready for the live view.** Models are lightened to live-view triangle budgets: leaves and other parts are decimated separately, so a tree keeps every leaf at about an eighth of its triangles. Leaf textures with alpha are marked to draw cut out, never blended.
+- **In the app.** `Apps/Hestia/build-app.sh` builds the library with Blender (`/Applications/Blender.app`, or `BLENDER`) when it is missing or its builder has changed, keeps it in `Apps/Hestia/build/Library`, and copies it into the app. `HESTIA_LIBRARY_SOURCE` names a library built elsewhere. The default library is about 80 MB. The build fails closed: with no Blender, no built library, and no `HESTIA_LIBRARY_SOURCE` it stops, and a named or cached library that fails its check stops it too. `HESTIA_ALLOW_FLAT=1` asks for a development build without a library, which draws in flat colors with simple shapes. `sh Apps/Hestia/test-build-app.sh` checks these rules without building.
+- **What the view does with it** (`LiveLook.swift`):
+  - **Materials:** every surface with a library material wears its photographed maps at their real size. Texture coordinates follow each face, so roof courses run along the eaves and tiles stay level (`SurfaceMapping.swift`).
+  - **Models:** each placed item with a library model is drawn by that model, fitted to the item's footprint or height.
+  - **Light:** the sky photo is the background and the image-based light, and the sun lamp stands where the photo's sun is.
+  - **Camera:** high dynamic range, ambient occlusion, and a light vignette.
+  - **Walking inside:** the sky light is turned down and each room gets a warm ceiling light, since image-based light reaches through walls. The camera then meters its exposure as a photographer would: it draws a small picture of what it sees and moves the exposure until the picture's mean brightness is near the middle. Starting a walk resets the exposure to the same start and meters fully, so nothing is carried in from an earlier walk; walking on meters a gentle step every half second, so the exposure eases from room to room. No fixed exposure suits every house and every Mac's GPU.
+- **Your own libraries.** The format is open: a folder with `library.json` and USDZ models, which Blender writes directly and Maya and 3ds Max write through their USD exporters. Loading a person's own library beside the default one is planned. Paths in a library must stay inside its folder, and links that lead out are refused.
+- **Checking a library.** `python3 tools/blender/check_library.py <folder>` fails unless:
+  - `library.json` is a regular file, and the library is complete, not a partial build;
+  - every look and catalog item maps to the very asset, tile, fit, turn, and file the renderer's tables name for it, maps carry their canonical names, and every model's size is one a real piece could be (1 cm to 50 m);
+  - the sky is the renderer's photo, laid out for SceneKit, its sun at the builder's bearing and above the horizon;
+  - its provenance is whole: Poly Haven as source, CC0 as license, the builder's version, every asset it uses credited with its download URL, size, and SHA-256, and every file it holds (CREDITS.txt included) recorded with its size and SHA-256, matching what is on disk. `build-app.sh` runs it on whatever library it is about to package.
+- **Checking the look.** With a built library on a Mac:
+
+  ```sh
+  HESTIA_LIBRARY=Apps/Hestia/build/Library HESTIA_SNAPSHOT_DIR=/tmp/hestia-snapshots \
+    swift test --filter LiveViewSnapshotTests
+  ```
+
+  This writes stills of the sample house from outside, at the street, in the garden, toward the sun, and inside.
 
 ## Photo renders with Blender
 
@@ -69,9 +102,10 @@ The stage is in feet (`metersPerUnit` 0.3048), y up.
 
 ## Next steps for the live view
 
-The live 3D view uses SceneKit with flat colors, sun shadows, and simple shapes. Apple now keeps SceneKit in maintenance and points new 3D work to RealityKit. Planned:
+The live view uses SceneKit, which Apple now keeps in maintenance; RealityKit is its successor. Planned:
 
-- **RealityKit:** move the view to RealityKit, with image-based lighting from the same HDRI sky, grounding shadows, and tone mapping.
-- **Live materials:** use the same CC0 PBR texture sets as the photo renders, cached locally.
-- **Real models:** load the same models live (USDZ or glTF) in place of stand-ins, and let people import their own glTF, OBJ, and USDZ (Stream G).
+- **Doors and windows from the library:** door and window styles (panel and glass doors, casement and double-hung windows) as library pieces that stretch to each opening.
+- **Your own libraries:** load a person's library beside the default one, and add a model (USDZ, glTF, FBX) to it from the app.
+- **Photos from the library:** have Render Photo place the same library models, so photos and the live view match exactly.
+- **RealityKit:** move the view to RealityKit when SceneKit's maintenance status starts to cost features.
 - **More architectural detail:** baseboards, fascia and soffit, gutters, and a visible foundation.

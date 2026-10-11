@@ -253,10 +253,12 @@ def files(asset, cache):
 
 
 def texture_maps(asset, cache):
-    """Diffuse, OpenGL normal, and roughness maps at 1k, as local paths."""
+    """Diffuse, OpenGL normal, and roughness maps at 1k, as local paths. A texture sold in several colors has
+    no Diffuse map; its first color (col_1) stands in."""
     info = files(asset, cache)
     maps = {}
-    for key, name in (("Diffuse", "diffuse"), ("nor_gl", "normal"), ("Rough", "rough")):
+    color = "Diffuse" if "Diffuse" in info else next((key for key in sorted(info) if key.startswith("col_")), "")
+    for key, name in ((color, "diffuse"), ("nor_gl", "normal"), ("Rough", "rough")):
         if key in info and "1k" in info[key]:
             entry = info[key]["1k"].get("jpg") or info[key]["1k"].get("png")
             leaf = os.path.basename(urllib.parse.urlsplit(entry["url"]).path)
