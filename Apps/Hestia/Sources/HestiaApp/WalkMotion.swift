@@ -11,6 +11,8 @@ struct Walker: Equatable, Sendable {
     var floor: Double
     var heading: Double = 0
     var pitch: Double = 0
+    /// The storey whose walls stop the walker; it changes halfway up or down a stair (`WalkHouse`).
+    var storey: StoreyID?
 
     static let eyeHeight = 5.4
     /// How close the walker's middle comes to a wall face.
@@ -31,19 +33,30 @@ struct Walker: Equatable, Sendable {
 
     /// Moves for `seconds` as the keys held ask, stopping at walls and sliding along them.
     mutating func step(_ input: WalkInput, seconds: Double, barriers: WalkBarriers) {
+        for (dx, dy) in strides(input, seconds: seconds) {
+            (x, y) = barriers.resolve(x: x + dx, y: y + dy, radius: Self.radius)
+        }
+    }
+
+    /// Moves for `seconds` through the whole house: on the current storey's floor, and up or down its stairs.
+    mutating func step(_ input: WalkInput, seconds: Double, house: WalkHouse) {
+        for (dx, dy) in strides(input, seconds: seconds) {
+            house.move(&self, toX: x + dx, y: y + dy)
+        }
+    }
+
+    /// Turns as asked, then the move for `seconds` in short strides, so a fast one never jumps through a wall.
+    private mutating func strides(_ input: WalkInput, seconds: Double) -> [(Double, Double)] {
         heading += input.turn * Self.turnSpeed * seconds
         var dx = forward.x * input.forward + right.x * input.strafe
         var dy = forward.y * input.forward + right.y * input.strafe
         let length = (dx * dx + dy * dy).squareRoot()
-        guard length > 1e-9 else { return }
+        guard length > 1e-9 else { return [] }
         let distance = (input.fast ? Self.runSpeed : Self.walkSpeed) * seconds
         dx = dx / length * distance
         dy = dy / length * distance
-        // Short steps, so a fast stride never jumps through a wall.
         let steps = max(Int((distance / 0.25).rounded(.up)), 1)
-        for _ in 0..<steps {
-            (x, y) = barriers.resolve(x: x + dx / Double(steps), y: y + dy / Double(steps), radius: Self.radius)
-        }
+        return Array(repeating: (dx / Double(steps), dy / Double(steps)), count: steps)
     }
 
     /// Turns the view by a mouse drag in view points.
@@ -64,15 +77,15 @@ struct Walker: Equatable, Sendable {
             guard let middle = centroid(plan), best == nil || middle.area > best!.area else { continue }
             best = middle
         }
-        if let best { return Walker(x: best.x, y: best.y, floor: floor) }
+        if let best { return Walker(x: best.x, y: best.y, floor: floor, storey: storey) }
         let walls = document.walls.filter { $0.storeyID == storey }
         if !walls.isEmpty {
             let xs = walls.flatMap { [HouseScene.feet($0.start.x), HouseScene.feet($0.end.x)] }
             let ys = walls.flatMap { [HouseScene.feet($0.start.y), HouseScene.feet($0.end.y)] }
             return Walker(x: ((xs.min() ?? 0) + (xs.max() ?? 0)) / 2, y: ((ys.min() ?? 0) + (ys.max() ?? 0)) / 2,
-                          floor: floor)
+                          floor: floor, storey: storey)
         }
-        return Walker(x: 0, y: -20, floor: floor)
+        return Walker(x: 0, y: -20, floor: floor, storey: storey)
     }
 
     /// A polygon's area and the middle of that area.

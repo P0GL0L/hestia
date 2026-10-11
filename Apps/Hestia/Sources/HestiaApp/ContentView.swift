@@ -355,7 +355,7 @@ struct ContentView: View {
             HouseView(scene: model.house, document: model.document, meshes: model.meshes, sessionID: sessionID,
                       mode: houseMode, showRoof: showRoof, zoom: houseZoom,
                       walkStart: Walker.start(in: model.document, storey: model.groundStorey),
-                      barriers: WalkBarriers(document: model.document, storey: model.groundStorey),
+                      house: WalkHouse(document: model.document),
                       onLeaveWalk: {
                           houseMode = .orbit
                           status = Self.orbitingStatus
