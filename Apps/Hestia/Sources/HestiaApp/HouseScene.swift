@@ -76,6 +76,8 @@ enum SiteKind: String, CaseIterable, Sendable {
 /// the ground, lot, and paving.
 struct HouseScene: Equatable, Sendable {
     var solids: [Solid]
+    /// Placed items left for finished library models to draw, in place of their stand-in shapes.
+    var models: [PlacedModel] = []
     /// The middle of the house, in view space, for the camera to look at.
     var center: ScenePoint
     /// The house's largest extent in feet, at least 10.
@@ -85,8 +87,11 @@ struct HouseScene: Equatable, Sendable {
 
     static func feet(_ length: Length) -> Double { Double(length.ticks) * feetPerTick }
 
-    init(document: ModelDocument, meshes: [Mesh]) {
+    /// `leaving` names catalog items that a library model will draw: their placements go to `models` instead of
+    /// being drawn with simple shapes.
+    init(document: ModelDocument, meshes: [Mesh], leaving: Set<String> = []) {
         var house: [Look: Solid] = [:]
+        var models: [PlacedModel] = []
         var outdoor: [Look: Solid] = [:]
         Self.addEngineMeshes(meshes, to: &house)
         OpeningDetail.add(document, to: &house)
@@ -97,6 +102,12 @@ struct HouseScene: Equatable, Sendable {
             let turn = Double(placement.rotation.microDegrees) / 1_000_000 * .pi / 180
             let (x, y) = (Self.feet(placement.position.x), Self.feet(placement.position.y))
             let base = floor + Self.feet(placement.elevation)
+            if leaving.contains(placement.catalogItemID.rawValue) {
+                models.append(PlacedModel(catalogID: placement.catalogItemID.rawValue, position: .plan(x, y, base),
+                                          turn: turn, width: item.width, depth: item.depth, height: item.height,
+                                          outdoor: item.category == .outdoor))
+                continue
+            }
             // Outdoor items belong to the site, so the camera frames the house and not the trees.
             if item.category == .outdoor {
                 item.addSolids(to: &outdoor, cx: x, cy: y, floor: base, turn: turn, group: .site)
@@ -108,6 +119,7 @@ struct HouseScene: Equatable, Sendable {
         (center, span) = Self.extent(of: built.filter { $0.group != .site }, fallback: document)
         solids = built + Self.site(document, around: center, span: span)
             + outdoor.values.sorted { $0.look.rawValue < $1.look.rawValue }
+        self.models = models
     }
 
     // MARK: - House
@@ -173,6 +185,27 @@ struct HouseScene: Equatable, Sendable {
             }
         }
         if !ceiling.indices.isEmpty { solids[.ceiling] = ceiling }
+    }
+
+    /// The middle of each room's ceiling in view space, with the room's floor area in square feet and its
+    /// largest extent in feet, for lighting the rooms.
+    static func roomCeilings(_ document: ModelDocument) -> [(middle: ScenePoint, area: Double, reach: Double)] {
+        let walls = Dictionary(document.walls.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return document.rooms.compactMap { room in
+            guard let outline = RoomOutline.centerline(of: room, in: document) else { return nil }
+            let plan = outline.map { (x: feet($0.x), y: feet($0.y)) }
+            guard let middle = Walker.centroid(plan) else { return nil }
+            let floor = document.storeys.first { $0.id == room.storeyID }.map { feet($0.elevation) } ?? 0
+            let heights = room.boundaryWallIDs.compactMap { walls[$0].map { feet($0.height) } }
+            var twice = 0.0
+            for (index, point) in plan.enumerated() {
+                let next = plan[(index + 1) % plan.count]
+                twice += point.x * next.y - next.x * point.y
+            }
+            let xs = plan.map(\.x), ys = plan.map(\.y)
+            let reach = max((xs.max() ?? 0) - (xs.min() ?? 0), (ys.max() ?? 0) - (ys.min() ?? 0))
+            return (.plan(middle.x, middle.y, floor + (heights.min() ?? 8)), abs(twice) / 2, reach)
+        }
     }
 
     /// The room's floor finish, when it names one; otherwise tile in kitchens, baths, and laundries, carpet in
@@ -258,4 +291,18 @@ struct HouseScene: Equatable, Sendable {
                          normal: Solid.planNormal(dy / length, -dx / length, 0))
         }
     }
+}
+
+/// A placed item drawn by a finished model: where it stands and the size its model is fitted to.
+struct PlacedModel: Equatable, Sendable {
+    var catalogID: String
+    /// The middle of its footprint, on the floor it stands on, in view space (feet, y up).
+    var position: ScenePoint
+    /// Its turn counterclockwise seen from above, in radians; about +y in view space.
+    var turn: Double
+    /// The item's width, depth, and height in feet.
+    var width: Double
+    var depth: Double
+    var height: Double
+    var outdoor: Bool
 }

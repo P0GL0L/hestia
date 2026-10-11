@@ -1,4 +1,5 @@
 import AppKit
+import ATContracts
 import SceneKit
 import SwiftUI
 
@@ -15,10 +16,15 @@ enum HouseViewMode: Equatable {
 /// the largest room: W A S D or the arrow keys move, a drag looks around, Shift runs, and Escape leaves. Walls
 /// stop the walker; doors and cased openings let it through.
 ///
+/// With the asset library (`LiveLook`), surfaces wear photographed materials, furniture and planting are finished
+/// models, and the sky photo lights the house; without it, the house draws in flat colors with simple shapes.
+///
 /// An edit refills the scene but keeps the camera where the person left it. New and Open start another session,
 /// and the camera starts over.
 struct HouseView: NSViewRepresentable {
     var scene: HouseScene
+    var document: ModelDocument
+    var meshes: [Mesh]
     var sessionID: UUID
     var mode: HouseViewMode
     var showRoof: Bool
@@ -28,10 +34,14 @@ struct HouseView: NSViewRepresentable {
 
     final class Coordinator {
         var scene: HouseScene?
+        var document: ModelDocument?
+        var meshes: [Mesh]?
+        var shown: HouseScene?
         var sessionID: UUID?
         var mode = HouseViewMode.orbit
         let content = SCNNode()
         let orbitCamera = SCNNode()
+        let roomLights = SCNNode()
     }
 
     func makeCoordinator() -> Coordinator {
@@ -47,11 +57,19 @@ struct HouseView: NSViewRepresentable {
         view.defaultCameraController.worldUp = SCNVector3(0, 1, 0)
         view.defaultCameraController.inertiaEnabled = true
         let world = SCNScene()
-        Self.addLights(to: world.rootNode)
+        let look = LiveLook.shared
+        if let look {
+            _ = look.light(world)
+        } else {
+            Self.addLights(to: world.rootNode)
+        }
         world.rootNode.addChildNode(context.coordinator.content)
+        world.rootNode.addChildNode(context.coordinator.roomLights)
         let camera = SCNCamera()
         camera.zNear = 0.3
         camera.fieldOfView = 50
+        look?.tune(camera, inside: false)
+        view.look = look
         context.coordinator.orbitCamera.camera = camera
         world.rootNode.addChildNode(context.coordinator.orbitCamera)
         view.scene = world
@@ -63,15 +81,36 @@ struct HouseView: NSViewRepresentable {
         view.onLeaveWalk = onLeaveWalk
         view.barriers = barriers
         let newSession = coordinator.sessionID != sessionID
-        if newSession || coordinator.scene != scene {
-            Self.fill(coordinator.content, with: scene)
+        let changed = coordinator.scene != scene || coordinator.document != document || coordinator.meshes != meshes
+        if newSession || changed || coordinator.shown == nil {
+            let shown: HouseScene
+            if let look = LiveLook.shared {
+                shown = look.houseScene(document: document, meshes: meshes)
+                look.fill(coordinator.content, with: shown)
+                coordinator.roomLights.childNodes.forEach { $0.removeFromParentNode() }
+                look.roomLights(document).forEach(coordinator.roomLights.addChildNode)
+            } else {
+                shown = scene
+                Self.fill(coordinator.content, with: scene)
+            }
             coordinator.scene = scene
+            coordinator.document = document
+            coordinator.meshes = meshes
+            coordinator.shown = shown
         }
         if newSession {
             coordinator.sessionID = sessionID
-            aim(coordinator.orbitCamera, in: view)
+            aim(coordinator.orbitCamera, at: coordinator.shown ?? scene, in: view)
         }
         if mode != coordinator.mode || newSession {
+            // Lit for the mode first, so a walk meters its exposure in the light it will be seen in.
+            if LiveLook.shared != nil {
+                // The sky lights everything as if outdoors; inside, it is turned down and the rooms are lit.
+                let sky = mode == .walk ? LiveLook.insideSky : LiveLook.outsideSky
+                view.scene?.lightingEnvironment.intensity = sky
+            }
+            coordinator.roomLights.isHidden = mode != .walk
+            Self.show(coordinator.content, walking: mode == .walk, roof: showRoof)
             if mode == .walk {
                 view.startWalking(walkStart)
             } else {
@@ -81,12 +120,13 @@ struct HouseView: NSViewRepresentable {
             }
             coordinator.mode = mode
         }
+        coordinator.roomLights.isHidden = mode != .walk
         Self.show(coordinator.content, walking: mode == .walk, roof: showRoof)
     }
 
     /// Looks at the middle of the house from the south-east, high enough to see over the roof, and turns the
     /// orbit around that middle.
-    private func aim(_ camera: SCNNode, in view: SCNView) {
+    private func aim(_ camera: SCNNode, at scene: HouseScene, in view: SCNView) {
         let center = scene.center, span = CGFloat(scene.span)
         let target = SCNVector3(CGFloat(center.x), CGFloat(center.y), CGFloat(center.z))
         camera.camera?.zFar = Double(span * 40)
@@ -134,7 +174,7 @@ struct HouseView: NSViewRepresentable {
         }
     }
 
-    private static func name(_ group: SolidGroup) -> String {
+    static func name(_ group: SolidGroup) -> String {
         switch group {
         case .house: return "house"
         case .roof: return "roof"
@@ -182,11 +222,18 @@ struct HouseView: NSViewRepresentable {
 /// The 3D view, with walking: keys move the walker, a drag turns its head, and Escape hands back to orbit.
 final class HouseSCNView: SCNView {
     var barriers = WalkBarriers(segments: [])
+    /// The finished look, when the app has its asset library; the walking camera is tuned for it.
+    var look: LiveLook?
     var onLeaveWalk: @MainActor () -> Void = {}
     private(set) var walker: Walker?
     private var held = Set<UInt16>()
     private var timer: Timer?
     private var lastTick: TimeInterval = 0
+    private var lastMeter: TimeInterval = 0
+    /// Draws the small pictures the walk's exposure is metered from.
+    private var meterer: SCNRenderer?
+    /// The walking eye's camera, for tests.
+    var walkCamera: SCNCamera? { eye.camera }
     private var lastDrag: NSPoint?
     /// Turns with the walker's heading; the eye under it tilts with the pitch.
     private let body = SCNNode()
@@ -201,12 +248,16 @@ final class HouseSCNView: SCNView {
             camera.zNear = 0.2
             camera.zFar = 4000
             camera.fieldOfView = 70
+            look?.tune(camera, inside: true)
             eye.camera = camera
-            let lamp = SCNLight()
-            lamp.type = .omni
-            lamp.intensity = 320
-            lamp.castsShadow = false
-            eye.light = lamp
+            if look == nil {
+                // Without the library's lighting, a lamp at the eye keeps the rooms readable.
+                let lamp = SCNLight()
+                lamp.type = .omni
+                lamp.intensity = 320
+                lamp.castsShadow = false
+                eye.light = lamp
+            }
             body.addChildNode(eye)
         }
         if body.parent == nil {
@@ -215,6 +266,14 @@ final class HouseSCNView: SCNView {
         place()
         allowsCameraControl = false
         pointOfView = eye
+        // Every walk meters afresh from the same start, so an exposure the last walk ended on, in another
+        // room or another house, is never carried in.
+        eye.camera?.exposureOffset = LiveLook.insideExposure
+        if look != nil, let world = scene {
+            if meterer == nil { meterer = LiveLook.meteringRenderer() }
+            LiveLook.meter(world, from: eye, renderer: meterer)
+        }
+        lastMeter = ProcessInfo.processInfo.systemUptime
         held.removeAll()
         window?.makeFirstResponder(self)
         lastTick = ProcessInfo.processInfo.systemUptime
@@ -244,6 +303,12 @@ final class HouseSCNView: SCNView {
         current.step(input(), seconds: seconds, barriers: barriers)
         walker = current
         place()
+        // Every half second, one gentle round of metering, so walking from a bright room into a dim one eases
+        // the exposure over rather than jumping.
+        if look != nil, now - lastMeter > 0.5, let world = scene {
+            lastMeter = now
+            LiveLook.meter(world, from: eye, rounds: 1, largest: 0.35, renderer: meterer)
+        }
     }
 
     /// The keys held: W A S D or the arrows, Q and E to turn, Shift to run.
