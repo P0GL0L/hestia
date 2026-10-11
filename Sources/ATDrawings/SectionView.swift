@@ -10,8 +10,11 @@ enum SectionView {
     static let hatchStyle = DisplayStyle(layer: "A-SECT-PATT", pen: .extraFine)
     static let beyondStyle = DisplayStyle(layer: "A-SECT-BYND", pen: .thin)
 
-    static func extent(_ outlines: [ClassifiedOutline]) -> (min: Point2, max: Point2)? {
-        let points = outlines.flatMap(\.polygon)
+    static func extent(_ outlines: [ClassifiedOutline], beyond: [HiddenLines.Segment] = [])
+        -> (min: Point2, max: Point2)? {
+        let points = outlines.flatMap(\.polygon) + beyond.flatMap { segment in
+            [segment.start, segment.end].map { paperPoint(Int64($0.h.rounded()), Int64($0.v.rounded())) }
+        }
         guard let x0 = points.map(\.x.ticks).min(), let x1 = points.map(\.x.ticks).max(),
               let y0 = points.map(\.y.ticks).min(), let y1 = points.map(\.y.ticks).max() else { return nil }
         return (paperPoint(x0, y0), paperPoint(x1, y1))
@@ -37,7 +40,7 @@ enum SectionView {
     static func annotations(_ document: ModelDocument, extent: (min: Point2, max: Point2), view: ViewTransform,
                             units: LengthFormatStyle) -> [DisplayItem] {
         let reach = Length.millimeters(1500).ticks
-        let grade = document.storeys.map(\.elevation.ticks).min() ?? 0
+        let grade = ElevationView.grade(document)
         func at(_ x: Int64, _ z: Int64) -> Point2 { view.paper(paperPoint(x, z)) }
         var items = [DisplayItem(.line(start: at(extent.min.x.ticks - reach, grade),
                                        end: at(extent.max.x.ticks + reach, grade)), style: ElevationView.groundStyle)]

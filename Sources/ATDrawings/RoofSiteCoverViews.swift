@@ -36,6 +36,12 @@ enum RoofPlanView {
     }
 
     static func items(_ document: ModelDocument, view: ViewTransform, roofMeshes: [Mesh] = []) -> [DisplayItem] {
+        // Several roofs overlap and meet; drawn one by one, each would show its whole outline through the others.
+        // Drawn together from above, only what shows is drawn.
+        let meshed = Set(roofMeshes.compactMap(\.elementID))
+        if document.roofs.count > 1, document.roofs.allSatisfy({ meshed.contains($0.id.rawValue) }) {
+            return together(document, view: view, roofMeshes: roofMeshes)
+        }
         func at(_ x: Int64, _ y: Int64) -> Point2 { view.paper(paperPoint(x, y)) }
         var items: [DisplayItem] = []
         let roofStoreys = Set(document.roofs.map(\.storeyID))
@@ -103,6 +109,65 @@ enum RoofPlanView {
     }
 
     static let unresolved = "ROOF PLANES NOT RESOLVED"
+    static let eaveStyle = DisplayStyle(layer: "A-ROOF", pen: .wide)
+    static let arrowStyle = DisplayStyle(layer: "A-ANNO-SYMB", pen: .fine)
+
+    /// Seen straight down: h is x, v is y, and nearer is higher.
+    static let fromAbove = HiddenLines.View(project: { x, y, z in (x, y, -z) }, toward: (0, 0, 1))
+
+    /// Every roof drawn together from above, as a roof plan is drawn: the eaves wherever a roof's edge shows
+    /// against the ground, every ridge, hip, and valley that shows, the lines where one roof runs into another,
+    /// nothing hidden under a higher roof; the building's outer walls dashed beneath; and on each sloped plane
+    /// that shows, its pitch with an arrow pointing down the slope.
+    static func together(_ document: ModelDocument, view: ViewTransform, roofMeshes: [Mesh]) -> [DisplayItem] {
+        var items: [DisplayItem] = []
+        for outline in SitePlanView.footprint(document) {
+            items.append(DisplayItem(.polyline(points: outline.map { view.paper($0) }, closed: true),
+                                     style: belowStyle))
+        }
+        let cell = Double(Length.inches(1).ticks)
+        let segments = HiddenLines.segments(roofMeshes, view: fromAbove, cell: cell, tolerance: cell * 2)
+        for segment in segments {
+            let style = segment.kind == .profile ? eaveStyle : (segment.kind == .outline ? roofStyle : lineStyle)
+            let start = view.paper(paperPoint(Int64(segment.start.h.rounded()), Int64(segment.start.v.rounded())))
+            let end = view.paper(paperPoint(Int64(segment.end.h.rounded()), Int64(segment.end.v.rounded())))
+            items.append(DisplayItem(.line(start: start, end: end), style: style, elementID: segment.elementID))
+        }
+        // A pitch where its plane is the top of the whole roof, not under another.
+        let triangles = HiddenLines.triangles(roofMeshes, view: fromAbove)
+        let buffer = HiddenLines.DepthBuffer(triangles, cell: cell * 6)
+        for roof in document.roofs {
+            let meshes = roofMeshes.filter { $0.elementID == roof.id.rawValue }
+            let planes = RoofFolds.planes(of: meshes)
+            for plane in planes {
+                let slope = (plane.a * plane.a + plane.b * plane.b).squareRoot()
+                guard slope > 1e-6, let spot = labelSpot(plane, planes) else { continue }
+                let (x, y) = (Double(spot.x.ticks), Double(spot.y.ticks))
+                let height = plane.a * x + plane.b * y + plane.c
+                guard buffer.at(x, y) >= -height - cell * 6 else { continue }
+                let rise = Length(ticks: Int64((slope * Double(Length.inches(12).ticks)).rounded()))
+                let at = view.paper(spot)
+                items.append(label(ratio(rise), at: at))
+                items += slopeArrow(at: at, down: (-plane.a / slope, -plane.b / slope))
+            }
+        }
+        return items
+    }
+
+    /// A short arrow beside a pitch, pointing down the slope (`down` a unit plan direction).
+    static func slopeArrow(at point: Point2, down: (Double, Double)) -> [DisplayItem] {
+        let reach = Double(mmTicks(6)), head = Double(mmTicks(3)) / 2
+        let (x, y) = (Double(point.x.ticks), Double(point.y.ticks) - Double(mmTicks(4)))
+        let tail = (x - down.0 * reach / 2, y - down.1 * reach / 2)
+        let tip = (x + down.0 * reach / 2, y + down.1 * reach / 2)
+        func pt(_ p: (Double, Double)) -> Point2 { paperPoint(Int64(p.0.rounded()), Int64(p.1.rounded())) }
+        let back = (-down.0, -down.1), side = (-down.1, down.0)
+        let left = (tip.0 + (back.0 + side.0 * 0.6) * head, tip.1 + (back.1 + side.1 * 0.6) * head)
+        let right = (tip.0 + (back.0 - side.0 * 0.6) * head, tip.1 + (back.1 - side.1 * 0.6) * head)
+        return [DisplayItem(.line(start: pt(tail), end: pt(tip)), style: arrowStyle),
+                DisplayItem(.line(start: pt(left), end: pt(tip)), style: arrowStyle),
+                DisplayItem(.line(start: pt(right), end: pt(tip)), style: arrowStyle)]
+    }
 
     /// A roof drawn from its mesh, in model plan coordinates: the outer eave outlines, the folds (hips, ridges,
     /// and valleys), and a pitch label inside each sloped plane. Nil when there is no upward-facing roof.
