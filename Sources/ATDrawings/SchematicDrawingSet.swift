@@ -250,12 +250,16 @@ public struct SchematicDrawingSet: DrawingGenerator {
             }
             let under = paperPoint(placed.transform.paperOrigin.x.ticks - reserve,
                                    placed.transform.paperOrigin.y.ticks - reserve - mmTicks(8))
-            let items = FloorPlanView.items(document: document, storey: storeyID, outlines: outlines, areas: areas,
-                                            view: placed.transform, stairsBelow: stairsBelow)
-                + DimensionChains.items(document: document, storey: storeyID, view: placed.transform,
-                                        units: dimensionUnits(document, sheet: sheet))
-                + DimensionChains.interiorItems(document: document, storey: storeyID, view: placed.transform,
-                                                units: dimensionUnits(document, sheet: sheet))
+            // The walls, openings, stairs, and outside chains first; then the labels where they have room.
+            let drawn = DimensionText.fit(
+                FloorPlanView.items(document: document, storey: storeyID, outlines: outlines, areas: areas,
+                                    view: placed.transform, stairsBelow: stairsBelow, labels: false)
+                    + DimensionChains.items(document: document, storey: storeyID, view: placed.transform,
+                                            units: dimensionUnits(document, sheet: sheet)),
+                scale: scale)
+            let items = drawn
+                + PlanLabels.items(document: document, storey: storeyID, areas: areas, view: placed.transform,
+                                   drawn: drawn, units: dimensionUnits(document, sheet: sheet))
                 + SheetFrame.viewTitle("\(storeyName) Plan", scale: scale, at: placed.fits ? under : titleAt)
             return ViewDrawing(items: items, scale: scale)
         case let .elevation(direction):

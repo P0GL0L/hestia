@@ -150,7 +150,8 @@ private func inside(_ point: Point2, _ polygon: [Point2]) -> Bool {
     let view = ViewTransform(scale: .eighthInch, modelOrigin: paperPoint(0, 0), paperOrigin: paperPoint(0, 0))
     let area = PaperRect(minX: 0, minY: 0, width: mmTicks(400), height: mmTicks(400))
     func hatchedAtMiddle(_ document: ModelDocument) -> Bool {
-        let middle = view.paper(pt(20, 20))
+        // Off the middle, where the building's name masks the hatch.
+        let middle = view.paper(pt(10, 30))
         return SitePlanView.items(document, view: view, area: area).contains { item in
             guard item.style == SitePlanView.patternStyle, case let .line(start, end) = item.primitive else {
                 return false

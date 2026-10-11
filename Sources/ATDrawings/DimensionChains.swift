@@ -141,6 +141,37 @@ enum DimensionChains {
         return items
     }
 
+    /// A box room's clear width and depth as dimension lines, each at several places across the room in order
+    /// of preference, for `PlanLabels` to set where they have room: the first is where `interiorItems` draws it.
+    static func interiorCandidates(_ room: Room, document: ModelDocument, view: ViewTransform,
+                                   units: LengthFormatStyle) -> (width: [[DisplayItem]], depth: [[DisplayItem]]) {
+        let walls = Dictionary(uniqueKeysWithValues: document.walls.map { ($0.id, $0) })
+        guard let (x0, x1, y0, y1) = clearBox(room.boundaryWallIDs.compactMap({ walls[$0] })) else { return ([], []) }
+        let id = room.id.rawValue
+        let widthText = DrawingUnits.dimensionText(document, length: Length(ticks: x1 - x0),
+                                                   override: document.dimensionOverride(for: id, face: .width),
+                                                   units: units)
+        let depthText = DrawingUnits.dimensionText(document, length: Length(ticks: y1 - y0),
+                                                   override: document.dimensionOverride(for: id, face: .depth),
+                                                   units: units)
+        // Shares of the way across the room, a quarter first, never hugging a wall. A room too small on paper
+        // for a dimension line beside its tag gets none; its tag gives the size.
+        let shares: [(Int64, Int64)] = [(1, 4), (3, 4), (1, 3), (2, 3), (3, 8), (5, 8)]
+        let paperWidth = view.paper(Length(ticks: x1 - x0)).ticks, paperDepth = view.paper(Length(ticks: y1 - y0)).ticks
+        guard paperWidth >= mmTicks(25), paperDepth >= mmTicks(25) else { return ([], []) }
+        let width = shares.map { share -> [DisplayItem] in
+            let y = y0 + (y1 - y0) * share.0 / share.1
+            return [DisplayItem(.dimension(from: view.paper(paperPoint(x0, y)), to: view.paper(paperPoint(x1, y)),
+                                           offset: Length(ticks: 0), override: widthText), style: style, elementID: id)]
+        }
+        let depth = shares.map { share -> [DisplayItem] in
+            let x = x0 + (x1 - x0) * share.0 / share.1
+            return [DisplayItem(.dimension(from: view.paper(paperPoint(x, y0)), to: view.paper(paperPoint(x, y1)),
+                                           offset: Length(ticks: 0), override: depthText), style: style, elementID: id)]
+        }
+        return (width, depth)
+    }
+
     /// Face-to-face box of a room bounded by axis-aligned walls, or nil.
     static func clearBox(_ boundary: [Wall]) -> (Int64, Int64, Int64, Int64)? {
         guard let corners = FloorPlanView.roomPolygon(boundary), corners.count == 4 else { return nil }
