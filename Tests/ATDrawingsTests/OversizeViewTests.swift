@@ -37,10 +37,13 @@ private func texts(_ sheet: SheetDrawing) -> [String] {
     let wallBounds = try #require(DisplayList(items: walls).bounds)
     #expect(wallBounds.min.x.ticks >= area.minX && wallBounds.max.x.ticks <= area.maxX)
     #expect(wallBounds.min.y.ticks >= area.minY && wallBounds.max.y.ticks <= area.maxY)
-    // The sheet keeps its stored scale; the view title prints the scale the plan is drawn at.
-    #expect(plan.scale == oneInch)
-    #expect(!texts(plan).contains("SCALE: \(oneInch.label)"))
-    #expect(texts(plan).contains { $0.hasPrefix("SCALE: ") })
+    // The model's sheet keeps its stored scale, but the drawn sheet's title block and the view title both
+    // print the scale the plan is drawn at, so nothing on the page claims 1" = 1'-0".
+    #expect(document.sheets[index].scale == oneInch)
+    #expect(plan.scale != oneInch && plan.scale != nil)
+    #expect(!texts(plan).contains { $0.contains(oneInch.label) })
+    #expect(texts(plan).contains("SCALE: \(plan.scale?.label ?? "")"))
+    #expect(texts(plan).contains(plan.scale?.label ?? "-"))
 }
 
 @Test func aViewThatFitsKeepsTheSheetScale() throws {

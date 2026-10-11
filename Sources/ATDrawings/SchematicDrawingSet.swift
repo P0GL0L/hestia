@@ -7,7 +7,12 @@ import Foundation
 /// When the model has no sheets, it draws one floor plan sheet per storey on ARCH D at 1/4" = 1'-0"; once
 /// there are walls, an elevations sheet with all four elevations, each at the largest scale that fits, and a
 /// section at 1/4" = 1'-0" cut south to north through the middle of the walls; and once there is a roof, a roof
-/// plan at 1/4" = 1'-0". These sheets exist only in the drawn set, never in the model.
+/// plan at 1/4" = 1'-0". With walls the set also opens with a cover sheet (index, notes, and legend), then a
+/// site plan at 1/8" = 1'-0" when the model has terrain, and closes with door and window schedules when it has
+/// doors or windows. These sheets exist only in the drawn set, never in the model.
+///
+/// A view that does not fit its sheet at the sheet's scale is drawn at the largest standard scale that does, and
+/// the title block prints the scale the views were actually drawn at, or AS NOTED when they differ.
 public struct SchematicDrawingSet: DrawingGenerator {
     /// Printed in the title block's date field, such as `2026-10-06`. Nil prints a dash.
     public var issueDate: String?
@@ -44,7 +49,25 @@ public struct SchematicDrawingSet: DrawingGenerator {
             sheets.append(Sheet(id: Self.defaultSheetID(document, tag: 0x41), number: "A-401", title: "Roof Plan",
                                 paper: .archD, scale: .quarterInch, views: [.roofPlan]))
         }
-        return sheets
+        guard !document.walls.isEmpty else { return sheets }
+        // A set reads as a set: the cover with its index, notes, and legend first; the site plan next when there
+        // is a site; and the door and window schedules last when there are doors and windows to list.
+        var front = [Sheet(id: Self.defaultSheetID(document, tag: 0x01), number: "A-000", title: "Cover",
+                           paper: .archD, scale: nil, views: [.cover])]
+        if !document.terrainPatches.isEmpty {
+            front.append(Sheet(id: Self.defaultSheetID(document, tag: 0x02), number: "A-001", title: "Site Plan",
+                               paper: .archD, scale: .eighthInch, views: [.sitePlan]))
+        }
+        var back: [Sheet] = []
+        let schedules: [SheetView] = [
+            document.openings.contains { $0.kind.isDoor } ? .schedule(kind: .doors) : nil,
+            document.openings.contains { $0.kind.isWindow } ? .schedule(kind: .windows) : nil,
+        ].compactMap { $0 }
+        if !schedules.isEmpty {
+            back.append(Sheet(id: Self.defaultSheetID(document, tag: 0x61), number: "A-601", title: "Schedules",
+                              paper: .archD, scale: nil, views: schedules))
+        }
+        return front + sheets + back
     }
 
     /// The cut for the section the set adds on its own: south to north, as on the cottage, at the middle of the
@@ -89,15 +112,32 @@ public struct SchematicDrawingSet: DrawingGenerator {
     }
 
     func draw(_ sheet: Sheet, document: ModelDocument, geometry: any GeometryEngine) throws -> SheetDrawing {
-        var items = SheetFrame.items(number: sheet.number, title: sheet.title, scale: sheet.scale, paper: sheet.paper,
-                                     projectName: document.project.name, issueDate: issueDate)
         let area = SheetFrame.drawingArea(for: sheet.paper)
         let slots = Self.slots(in: area, count: sheet.views.count)
+        var drawn: [ViewDrawing] = []
         for (view, slot) in zip(sheet.views, slots) {
-            items += try drawView(view, in: slot, sheet: sheet, document: document, geometry: geometry)
+            drawn.append(try drawView(view, in: slot, sheet: sheet, document: document, geometry: geometry))
         }
-        return SheetDrawing(number: sheet.number, title: sheet.title, paper: sheet.paper, scale: sheet.scale,
+        let scale = Self.printedScale(drawn.compactMap(\.scale), sheet: sheet)
+        let items = SheetFrame.items(number: sheet.number, title: sheet.title, scale: scale, paper: sheet.paper,
+                                     projectName: document.project.name, issueDate: issueDate)
+            + drawn.flatMap(\.items)
+        return SheetDrawing(number: sheet.number, title: sheet.title, paper: sheet.paper, scale: scale,
                             content: DisplayList(items: items))
+    }
+
+    /// A view's drawing and the scale it was drawn at; nil for views with no scale, such as a schedule.
+    struct ViewDrawing {
+        var items: [DisplayItem]
+        var scale: DrawingScale?
+    }
+
+    /// The scale a sheet's title block prints: the one every scaled view on it was drawn at, which is the sheet's
+    /// own unless a view had to be drawn smaller to fit; nil (AS NOTED) when its views differ. A sheet with no
+    /// scaled views keeps its own.
+    static func printedScale(_ scales: [DrawingScale], sheet: Sheet) -> DrawingScale? {
+        guard let first = scales.first else { return sheet.scale }
+        return scales.allSatisfy { $0 == first } ? first : nil
     }
 
     /// The transform a storey's floor plan is drawn with, from model space to its sheet's paper space, so a view
@@ -121,20 +161,27 @@ public struct SchematicDrawingSet: DrawingGenerator {
         let reserve = DimensionChains.reserve
         let inner = PaperRect(minX: slot.minX + reserve, minY: slot.minY + reserve,
                               width: slot.width - reserve, height: slot.height - reserve)
-        return place(extent: extent, in: inner, sheetScale: sheet.scale)
+        return place(extent: extent, in: inner, sheetScale: sheet.scale,
+                                imperial: Self.imperial(document, sheet: sheet))
     }
 
     /// A view centred in its area at the sheet's scale; or, when it does not fit there at that scale, at the
     /// largest standard scale that does, so it never runs over the title block or off the page. The view's title
     /// prints the scale it is drawn at. With no sheet scale it is the fitting scale.
-    static func place(extent: (min: Point2, max: Point2), in area: PaperRect, sheetScale: DrawingScale?)
-        -> (transform: ViewTransform, fits: Bool) {
+    /// Whether a sheet's fallback scales are imperial: whether it measures in feet and inches, by the same
+    /// rule as its dimensions (the project's units, its own scale, the set's other sheets, its paper).
+    static func imperial(_ document: ModelDocument, sheet: Sheet) -> Bool {
+        SchematicDrawingSet().dimensionUnits(document, sheet: sheet) == .feetInchesFractions
+    }
+
+    static func place(extent: (min: Point2, max: Point2), in area: PaperRect, sheetScale: DrawingScale?,
+                      imperial: Bool) -> (transform: ViewTransform, fits: Bool) {
         if let sheetScale {
             let placed = ViewTransform.centering(modelMin: extent.min, modelMax: extent.max, in: area,
                                                  scale: sheetScale)
             if placed.fits { return placed }
         }
-        let scale = fittingScale(extent: extent, in: area)
+        let scale = fittingScale(extent: extent, in: area, imperial: imperial)
         return ViewTransform.centering(modelMin: extent.min, modelMax: extent.max, in: area, scale: scale)
     }
 
@@ -150,14 +197,17 @@ public struct SchematicDrawingSet: DrawingGenerator {
 
     private func drawView(
         _ view: SheetView, in slot: PaperRect, sheet: Sheet, document: ModelDocument, geometry: any GeometryEngine
-    ) throws -> [DisplayItem] {
+    ) throws -> ViewDrawing {
         let titleAt = paperPoint(slot.minX, slot.minY - mmTicks(8))
         let units = self.units(document)
+        func missing(_ text: String) -> ViewDrawing {
+            ViewDrawing(items: SheetFrame.notGenerated(text, in: slot), scale: nil)
+        }
         switch view {
         case let .floorPlan(storeyID):
             let storeyName = document.storeys.first { $0.id == storeyID }?.name ?? "Floor"
             guard let placed = Self.floorPlanPlacement(document, storey: storeyID, in: slot, sheet: sheet) else {
-                return SheetFrame.notGenerated("\(storeyName) plan has no walls", in: slot)
+                return missing("\(storeyName) plan has no walls")
             }
             let reserve = DimensionChains.reserve
             let scale = placed.transform.scale
@@ -170,13 +220,14 @@ public struct SchematicDrawingSet: DrawingGenerator {
             }
             let under = paperPoint(placed.transform.paperOrigin.x.ticks - reserve,
                                    placed.transform.paperOrigin.y.ticks - reserve - mmTicks(8))
-            return FloorPlanView.items(document: document, storey: storeyID, outlines: outlines, areas: areas,
-                                       view: placed.transform, stairsBelow: stairsBelow)
+            let items = FloorPlanView.items(document: document, storey: storeyID, outlines: outlines, areas: areas,
+                                            view: placed.transform, stairsBelow: stairsBelow)
                 + DimensionChains.items(document: document, storey: storeyID, view: placed.transform,
                                         units: dimensionUnits(document, sheet: sheet))
                 + DimensionChains.interiorItems(document: document, storey: storeyID, view: placed.transform,
                                                 units: dimensionUnits(document, sheet: sheet))
                 + SheetFrame.viewTitle("\(storeyName) Plan", scale: scale, at: placed.fits ? under : titleAt)
+            return ViewDrawing(items: items, scale: scale)
         case let .elevation(direction):
             let name = Self.name(of: view)
             let roofIDs = Set(document.roofs.map(\.id.rawValue))
@@ -185,15 +236,17 @@ public struct SchematicDrawingSet: DrawingGenerator {
             let roofMeshes = meshes.filter { mesh in mesh.elementID.map { roofIDs.contains($0) } ?? false }
             let slabMeshes = meshes.filter { mesh in mesh.elementID.map { slabIDs.contains($0) } ?? false }
             guard let extent = ElevationView.extent(document, direction, roofMeshes: roofMeshes) else {
-                return SheetFrame.notGenerated(name, in: slot)
+                return missing(name)
             }
-            let placed = Self.place(extent: extent, in: slot, sheetScale: sheet.scale)
+            let placed = Self.place(extent: extent, in: slot, sheetScale: sheet.scale,
+                                imperial: Self.imperial(document, sheet: sheet))
             let scale = placed.transform.scale
             let under = paperPoint(placed.transform.paperOrigin.x.ticks,
                                    placed.transform.paperOrigin.y.ticks - mmTicks(10))
-            return ElevationView.items(document, direction, view: placed.transform, roofMeshes: roofMeshes,
-                                       slabMeshes: slabMeshes)
+            let items = ElevationView.items(document, direction, view: placed.transform, roofMeshes: roofMeshes,
+                                            slabMeshes: slabMeshes)
                 + SheetFrame.viewTitle(name, scale: scale, at: placed.fits ? under : titleAt)
+            return ViewDrawing(items: items, scale: scale)
         case let .schedule(kind):
             var areas: [RoomID: Area] = [:]
             if kind == .areas {
@@ -203,16 +256,21 @@ public struct SchematicDrawingSet: DrawingGenerator {
                 }
             }
             guard let table = ScheduleView.table(kind, document: document, style: units, areas: areas) else {
-                return SheetFrame.notGenerated(Self.name(of: view), in: slot)
+                return missing(Self.name(of: view))
             }
-            return ScheduleView.items(table, at: paperPoint(slot.minX, slot.maxY - mmTicks(8)))
+            return ViewDrawing(items: ScheduleView.items(table, at: paperPoint(slot.minX, slot.maxY - mmTicks(8)),
+                                                         height: slot.height - mmTicks(8), width: slot.width),
+                               scale: nil)
         case .cover:
-            return CoverSheet.items(project: document.project.name, index: sheetsToDraw(document), in: slot)
+            return ViewDrawing(items: CoverSheet.items(project: document.project.name, index: sheetsToDraw(document),
+                                                       in: slot),
+                               scale: nil)
         case .roofPlan:
             guard let extent = RoofPlanView.extent(document) else {
-                return SheetFrame.notGenerated("Roof plan has no roof", in: slot)
+                return missing("Roof plan has no roof")
             }
-            let placed = Self.place(extent: extent, in: slot, sheetScale: sheet.scale)
+            let placed = Self.place(extent: extent, in: slot, sheetScale: sheet.scale,
+                                imperial: Self.imperial(document, sheet: sheet))
             let scale = placed.transform.scale
             let under = paperPoint(placed.transform.paperOrigin.x.ticks,
                                    placed.transform.paperOrigin.y.ticks - mmTicks(12))
@@ -220,48 +278,60 @@ public struct SchematicDrawingSet: DrawingGenerator {
             let roofMeshes = try geometry.meshes(of: document).filter { mesh in
                 mesh.elementID.map { roofIDs.contains($0) } ?? false
             }
-            return RoofPlanView.items(document, view: placed.transform, roofMeshes: roofMeshes)
+            let items = RoofPlanView.items(document, view: placed.transform, roofMeshes: roofMeshes)
                 + SheetFrame.viewTitle("Roof Plan", scale: scale, at: placed.fits ? under : titleAt)
+            return ViewDrawing(items: items, scale: scale)
         case .sitePlan:
-            guard let extent = SitePlanView.extent(document) else {
-                return SheetFrame.notGenerated("Site plan has no building or terrain", in: slot)
+            let roofIDs = Set(document.roofs.map(\.id.rawValue))
+            let roofMeshes = try geometry.meshes(of: document).filter { mesh in
+                mesh.elementID.map { roofIDs.contains($0) } ?? false
             }
-            let placed = Self.place(extent: extent, in: slot, sheetScale: sheet.scale)
+            guard let extent = SitePlanView.extent(document, roofMeshes: roofMeshes) else {
+                return missing("Site plan has no building or terrain")
+            }
+            let placed = Self.place(extent: extent, in: slot, sheetScale: sheet.scale,
+                                imperial: Self.imperial(document, sheet: sheet))
             let scale = placed.transform.scale
-            return SitePlanView.items(document, view: placed.transform, area: slot)
+            let items = SitePlanView.items(document, view: placed.transform, area: slot, units: units,
+                                           roofMeshes: roofMeshes)
                 + SheetFrame.viewTitle("Site Plan", scale: scale, at: titleAt)
+            return ViewDrawing(items: items, scale: scale)
         case let .section(line):
             let outlines = try geometry.section(of: document, along: line)
             guard let extent = SectionView.extent(outlines) else {
-                return SheetFrame.notGenerated("Section line crosses nothing", in: slot)
+                return missing("Section line crosses nothing")
             }
-            let placed = Self.place(extent: extent, in: slot, sheetScale: sheet.scale)
+            let placed = Self.place(extent: extent, in: slot, sheetScale: sheet.scale,
+                                imperial: Self.imperial(document, sheet: sheet))
             let scale = placed.transform.scale
             let under = paperPoint(placed.transform.paperOrigin.x.ticks,
                                    placed.transform.paperOrigin.y.ticks - mmTicks(10))
-            return SectionView.items(outlines, view: placed.transform)
-                + SectionView.annotations(document, extent: extent, view: placed.transform,
-                                          units: units)
+            let items = SectionView.items(outlines, view: placed.transform)
+                + SectionView.annotations(document, extent: extent, view: placed.transform, units: units)
                 + SheetFrame.viewTitle("Building Section", scale: scale, at: placed.fits ? under : titleAt)
+            return ViewDrawing(items: items, scale: scale)
         case let .electricalPlan(storeyID):
             let storeyName = document.storeys.first { $0.id == storeyID }?.name ?? "Floor"
             guard document.mepSymbols.contains(where: { $0.storeyID == storeyID }),
                   let extent = FloorPlanView.extent(of: document, storey: storeyID) else {
-                return SheetFrame.notGenerated(Self.name(of: view), in: slot)
+                return missing(Self.name(of: view))
             }
             let legendWidth = mmTicks(80)
             let planArea = PaperRect(minX: slot.minX, minY: slot.minY, width: slot.width - legendWidth,
                                      height: slot.height)
-            let placed = Self.place(extent: extent, in: planArea, sheetScale: sheet.scale)
+            let placed = Self.place(extent: extent, in: planArea, sheetScale: sheet.scale,
+                                imperial: Self.imperial(document, sheet: sheet))
             let scale = placed.transform.scale
             let outlines = try geometry.planView(of: document, storey: storeyID)
             let under = paperPoint(placed.transform.paperOrigin.x.ticks,
                                    placed.transform.paperOrigin.y.ticks - mmTicks(12))
-            return ElectricalPlanView.items(document: document, storey: storeyID, outlines: outlines,
-                                            view: placed.transform,
-                                            legendAt: paperPoint(slot.maxX - legendWidth + mmTicks(6),
-                                                                 slot.maxY - mmTicks(8)))
-                + SheetFrame.viewTitle("\(storeyName) Electrical Plan", scale: scale, at: placed.fits ? under : titleAt)
+            let items = ElectricalPlanView.items(document: document, storey: storeyID, outlines: outlines,
+                                                 view: placed.transform,
+                                                 legendAt: paperPoint(slot.maxX - legendWidth + mmTicks(6),
+                                                                      slot.maxY - mmTicks(8)))
+                + SheetFrame.viewTitle("\(storeyName) Electrical Plan", scale: scale,
+                                       at: placed.fits ? under : titleAt)
+            return ViewDrawing(items: items, scale: scale)
         }
     }
 
@@ -307,16 +377,35 @@ public struct SchematicDrawingSet: DrawingGenerator {
         }
     }
 
-    /// The largest standard scale at which the extent fits the slot, falling back to 1:200.
-    static func fittingScale(extent: (min: Point2, max: Point2), in slot: PaperRect) -> DrawingScale {
-        let candidates: [DrawingScale] = [.quarterInch, .oneTo50, .eighthInch, .oneTo100,
-                                          DrawingScale(label: "1\" = 20'-0\"", modelUnitsPerPaperUnit: 240),
-                                          DrawingScale(label: "1:500", modelUnitsPerPaperUnit: 500)]
+    /// 3/16" = 1'-0", the step between 1/4" and 1/8" for houses too long for 1/4" on the sheet.
+    static let threeSixteenthsInch = DrawingScale(label: "3/16\" = 1'-0\"", modelUnitsPerPaperUnit: 64)
+
+    /// The fallback scales an architect would reach for, largest drawing first: feet and inches for an imperial
+    /// sheet, ratios for a metric one.
+    static let imperialScales: [DrawingScale] = [
+        .quarterInch, threeSixteenthsInch, .eighthInch,
+        DrawingScale(label: "1\" = 10'-0\"", modelUnitsPerPaperUnit: 120),
+        DrawingScale(label: "1/16\" = 1'-0\"", modelUnitsPerPaperUnit: 192),
+        DrawingScale(label: "1\" = 20'-0\"", modelUnitsPerPaperUnit: 240),
+        DrawingScale(label: "1\" = 40'-0\"", modelUnitsPerPaperUnit: 480),
+        DrawingScale(label: "1\" = 100'-0\"", modelUnitsPerPaperUnit: 1200),
+    ]
+    static let metricScales: [DrawingScale] = [
+        .oneTo50, .oneTo100,
+        DrawingScale(label: "1:200", modelUnitsPerPaperUnit: 200),
+        DrawingScale(label: "1:500", modelUnitsPerPaperUnit: 500),
+        DrawingScale(label: "1:1000", modelUnitsPerPaperUnit: 1000),
+    ]
+
+    /// The largest scale of the sheet's family at which the extent fits the slot, else the family's smallest.
+    static func fittingScale(extent: (min: Point2, max: Point2), in slot: PaperRect, imperial: Bool)
+        -> DrawingScale {
+        let candidates = imperial ? imperialScales : metricScales
         for scale in candidates {
             let placed = ViewTransform.centering(modelMin: extent.min, modelMax: extent.max, in: slot, scale: scale)
             if placed.fits { return scale }
         }
-        return DrawingScale(label: "1:1000", modelUnitsPerPaperUnit: 1000)
+        return candidates[candidates.count - 1]
     }
 }
 

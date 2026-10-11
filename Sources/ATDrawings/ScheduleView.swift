@@ -86,37 +86,94 @@ enum ScheduleView {
         return out.prefix(1).uppercased() + out.dropFirst()
     }
 
-    /// The table with its top-left corner at `origin`, title above.
-    static func items(_ table: Table, at origin: Point2) -> [DisplayItem] {
+    /// The table with its top left at `origin`. Given the `height` it may fill, a table too long for it
+    /// continues in further columns to the right, each with the header row again, so no row runs off the sheet.
+    /// Given the `width` too, a table wider than it is set smaller to fit, down to 60 % (below that it is
+    /// refused with a note); then only the columns that fit are drawn, and a note under the first says how many
+    /// rows were left out, rather than running off the sheet's side. A cell too long for its column is cut short
+    /// with "...".
+    static func items(_ table: Table, at origin: Point2, height: Int64? = nil, width: Int64? = nil) -> [DisplayItem] {
+        let fullWidth = table.columns.reduce(0) { $0 + $1.width }
+        var k = 1.0
+        if let width, fullWidth > width {
+            k = Double(width) / Double(fullWidth)
+            guard k >= 0.6 else {
+                return [DisplayItem(.text(position: paperPoint(origin.x.ticks, origin.y.ticks - mmTicks(4)),
+                                          string: table.title.uppercased() + " IS TOO WIDE FOR THIS SHEET",
+                                          height: .millimeters(3), rotation: .degrees(0), alignment: .left),
+                                    style: headStyle)]
+            }
+        }
+        let row = Int64((Double(rowHeight) * k).rounded(.down))
+        let fits = height.map { max(Int(($0 - mmTicks(10)) / row) - 1, 1) } ?? max(table.rows.count, 1)
+        guard table.rows.count > fits else { return block(table, at: origin, titled: true, scale: k) }
+        let blockWidth = table.columns.reduce(0) { $0 + Int64((Double($1.width) * k).rounded(.down)) }
+        let gap = mmTicks(10)
+        let columns = width.map { max(Int(($0 + gap) / (blockWidth + gap)), 1) } ?? Int.max
+        var items: [DisplayItem] = []
+        for (index, start) in stride(from: 0, to: table.rows.count, by: fits).enumerated() {
+            guard index < columns else {
+                let note = "\(table.rows.count - start) MORE ROWS DO NOT FIT THIS SHEET"
+                let y = origin.y.ticks - Int64(fits + 1) * row - mmTicks(5)
+                items.append(DisplayItem(.text(position: paperPoint(origin.x.ticks, y), string: note,
+                                               height: .millimeters(3), rotation: .degrees(0), alignment: .left),
+                                         style: headStyle))
+                break
+            }
+            var part = table
+            part.rows = Array(table.rows[start..<min(start + fits, table.rows.count)])
+            let at = paperPoint(origin.x.ticks + Int64(index) * (blockWidth + gap), origin.y.ticks)
+            items += block(part, at: at, titled: index == 0, scale: k)
+        }
+        return items
+    }
+
+    /// One block of a table: its title when `titled`, the header row, and its rows, all set `scale` times
+    /// their full size.
+    private static func block(_ table: Table, at origin: Point2, titled: Bool, scale k: Double) -> [DisplayItem] {
+        func sized(_ ticks: Int64) -> Int64 { Int64((Double(ticks) * k).rounded(.down)) }
         let x0 = origin.x.ticks, y0 = origin.y.ticks
-        let width = table.columns.reduce(0) { $0 + $1.width }
-        let rows = table.rows.count + 1
-        var items = [DisplayItem(.text(position: paperPoint(x0, y0 + mmTicks(3)), string: table.title.uppercased(),
-                                       height: .millimeters(4), rotation: .degrees(0), alignment: .left),
-                                 style: headStyle)]
-        for row in 0...rows {
-            let y = y0 - Int64(row) * rowHeight
+        let widths = table.columns.map { sized($0.width) }
+        let width = widths.reduce(0, +)
+        let rows = table.rows.count + 1, row = sized(rowHeight)
+        var items = titled ? [DisplayItem(.text(position: paperPoint(x0, y0 + mmTicks(3)),
+                                                string: table.title.uppercased(), height: .millimeters(4),
+                                                rotation: .degrees(0), alignment: .left), style: headStyle)] : []
+        for line in 0...rows {
+            let y = y0 - Int64(line) * row
             items.append(DisplayItem(.line(start: paperPoint(x0, y), end: paperPoint(x0 + width, y)),
-                                     style: row <= 1 ? headStyle : ruleStyle))
+                                     style: line <= 1 ? headStyle : ruleStyle))
         }
         var x = x0
-        let bottom = y0 - Int64(rows) * rowHeight
-        for column in table.columns {
+        let bottom = y0 - Int64(rows) * row
+        for columnWidth in widths {
             items.append(DisplayItem(.line(start: paperPoint(x, y0), end: paperPoint(x, bottom)), style: ruleStyle))
-            x += column.width
+            x += columnWidth
         }
         items.append(DisplayItem(.line(start: paperPoint(x, y0), end: paperPoint(x, bottom)), style: ruleStyle))
+        let textHeight = Length(ticks: sized(mmTicks(2))), pad = sized(mmTicks(2))
         for (index, cells) in ([table.columns.map(\.name)] + table.rows).enumerated() {
-            var cx = x0 + mmTicks(2)
-            let y = y0 - Int64(index + 1) * rowHeight + mmTicks(2)
-            for (cell, column) in zip(cells, table.columns) {
-                items.append(DisplayItem(.text(position: paperPoint(cx, y), string: cell,
-                                               height: .millimeters(2), rotation: .degrees(0),
-                                               alignment: .left), style: index == 0 ? headStyle : ruleStyle))
-                cx += column.width
+            var cx = x0 + pad
+            let y = y0 - Int64(index + 1) * row + pad
+            for (cell, columnWidth) in zip(cells, widths) {
+                items.append(DisplayItem(.text(position: paperPoint(cx, y),
+                                               string: shortened(cell, to: columnWidth - pad * 2, height: textHeight),
+                                               height: textHeight, rotation: .degrees(0), alignment: .left),
+                                         style: index == 0 ? headStyle : ruleStyle))
+                cx += columnWidth
             }
         }
         return items
+    }
+
+    /// `cell` as it fits `room` ticks of paper at `height`, cut short with "..." when it does not.
+    static func shortened(_ cell: String, to room: Int64, height: Length) -> String {
+        let size = Double(height.ticks) / 0.718
+        func fits(_ text: String) -> Bool { HelveticaMetrics.width(of: text) * size <= Double(room) }
+        guard !fits(cell) else { return cell }
+        var kept = cell
+        while !kept.isEmpty, !fits(kept + "...") { kept.removeLast() }
+        return kept.isEmpty ? "" : kept + "..."
     }
 
     static func height(of table: Table) -> Int64 {
