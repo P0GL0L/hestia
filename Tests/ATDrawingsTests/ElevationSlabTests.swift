@@ -44,16 +44,24 @@ private func horizontal(_ edges: [((Int64, Int64), (Int64, Int64))], at z: Int64
     #expect(horizontal(upper, at: mm(5_500), over: -mm(150), mm(10_150)) == 1)
 }
 
-@Test func elevationSheetDrawsTheSlabEdgeOnlyAboveGrade() throws {
-    var house = try fixture("l-house")
-    house.sheets = [Sheet(id: SheetID(UUID()), number: "A-201", title: "South", paper: .archD, scale: .quarterInch,
-                          views: [.elevation(direction: .south)])]
-    let sheet = try #require(try SchematicDrawingSet().sheets(for: house, geometry: HestiaGeometryEngine()).first)
-    let slabItems = sheet.content.items.filter { $0.style.layer == "A-ELEV-SLAB" }
+@Test func elevationDrawsTheSlabEdgeOnlyAboveGrade() throws {
+    let house = try fixture("l-house")
+    let meshes = try HestiaGeometryEngine().meshes(of: house)
+    let slabIDs = Set(house.slabs.map(\.id.rawValue))
+    let slabMeshes = meshes.filter { $0.elementID.map(slabIDs.contains) ?? false }
+    let view = ViewTransform(scale: .quarterInch, modelOrigin: paperPoint(0, 0), paperOrigin: paperPoint(0, 0))
+    // Drawn from the walls and slabs alone: one hatched, outlined band, for the upper slab; the ground slab
+    // sits at grade and is left out.
+    let items = ElevationView.items(house, .south, view: view, slabMeshes: slabMeshes)
+    let slabItems = items.filter { $0.style.layer == "A-ELEV-SLAB" }
     let upperSlab = try #require(house.slabs.first { $0.storeyID == house.storeys[1].id })
-    // One hatched, outlined band, for the upper slab; the ground slab sits at grade and is left out.
     #expect(slabItems.count == 2)
     #expect(slabItems.allSatisfy { $0.elementID == upperSlab.id.rawValue })
+    // Drawn from every mesh, nothing of the ground slab shows either: its top is the ground line.
+    let groundSlab = try #require(house.slabs.first { $0.storeyID == house.storeys[0].id })
+    let drawn = ElevationView.items(house, .south, view: view, slabMeshes: slabMeshes, meshes: meshes)
+    #expect(!drawn.isEmpty)
+    #expect(!drawn.contains { $0.elementID == groundSlab.id.rawValue })
 
     let cottage = try fixture("rect-cottage")
     let sheets = try SchematicDrawingSet().sheets(for: cottage, geometry: HestiaGeometryEngine())

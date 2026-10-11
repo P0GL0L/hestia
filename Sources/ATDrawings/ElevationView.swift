@@ -86,8 +86,13 @@ enum ElevationView {
         return (paperPoint(minH, minZ), paperPoint(maxH, maxZ))
     }
 
+    /// The elevation's drawing. With the engine's `meshes` for the whole model it is drawn from them with hidden
+    /// lines removed (see `meshItems`); without, from the walls facing this way and the roof silhouettes.
     static func items(_ document: ModelDocument, _ direction: ElevationDirection, view: ViewTransform,
-                      roofMeshes: [Mesh] = [], slabMeshes: [Mesh] = []) -> [DisplayItem] {
+                      roofMeshes: [Mesh] = [], slabMeshes: [Mesh] = [], meshes: [Mesh] = []) -> [DisplayItem] {
+        if !meshes.isEmpty {
+            return meshItems(document, direction, view: view, meshes: meshes, roofMeshes: roofMeshes)
+        }
         let faces = faces(document, direction)
         guard !faces.isEmpty else { return [] }
         func at(_ h: Int64, _ z: Int64) -> Point2 { view.paper(paperPoint(h, z)) }

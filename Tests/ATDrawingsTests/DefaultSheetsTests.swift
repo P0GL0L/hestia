@@ -107,6 +107,18 @@ private func count(_ sheet: SheetDrawing, layerPrefix: String) -> Int {
     #expect(marks == ["GROUND FLOOR 0'-0\""])
 }
 
+@Test func aRoofRunningNorthSouthIsCutWestToEast() throws {
+    var document = try model(walls: true, roof: true)
+    // The roof narrowed to 10' east to west and left 15' north to south, so its ridge runs north to south.
+    document.roofs[0].footprint = [pt(5, 0), pt(15, 0), pt(15, 15), pt(5, 15)]
+    let line = try #require(SchematicDrawingSet.defaultSectionLine(document))
+    let middle = Length.feet(7, inchCount: 6)
+    #expect(line == SectionLine(start: Point2(x: ft(-1), y: middle), end: Point2(x: ft(21), y: middle)))
+    let section = try #require(try draw(document).first { $0.number == "A-301" })
+    #expect(notGenerated(section).isEmpty)
+    #expect(count(section, layerPrefix: "A-SECT-MCUT") > 0)
+}
+
 @Test func noWallsNoSection() throws {
     let document = try model(walls: false, roof: false)
     #expect(SchematicDrawingSet.defaultSectionLine(document) == nil)

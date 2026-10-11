@@ -70,20 +70,50 @@ public struct SchematicDrawingSet: DrawingGenerator {
         return front + sheets + back
     }
 
-    /// The cut for the section the set adds on its own: south to north, as on the cottage, at the middle of the
-    /// box around every wall's centerline, from 1'-0" south of it to 1'-0" north. A cut down a north-south wall's
-    /// centerline would draw that whole wall as cut, so it moves east by half that wall's thickness plus 1", or,
-    /// when that lands inside another north-south wall, west by the same amount. Nil with no walls, or when both
-    /// sides land inside walls.
+    /// The cut for the section the set adds on its own: through the middle of the largest roof and across its
+    /// ridge, as blueprints cut, so the section shows that roof's pitch. That is south to north, as on the
+    /// cottage, unless the roof's footprint is longer north to south, when it runs west to east. With no roof
+    /// it crosses the middle of the box around every wall's centerline. Either way it runs from 1'-0" before
+    /// that box to 1'-0" past it. A cut down a wall's centerline would draw that whole wall as cut, so it moves
+    /// over by half that wall's thickness plus 1", or, when that lands inside another wall in line with the
+    /// cut, back by the same amount. Nil with no walls, or when both sides land inside walls.
     static func defaultSectionLine(_ document: ModelDocument) -> SectionLine? {
         let xs: [Int64] = document.walls.flatMap { [$0.start.x.ticks, $0.end.x.ticks] }
         let ys: [Int64] = document.walls.flatMap { [$0.start.y.ticks, $0.end.y.ticks] }
         guard let x0 = xs.min(), let x1 = xs.max(), let y0 = ys.min(), let y1 = ys.max() else { return nil }
         let foot: Int64 = Length.feet(1).ticks
-        guard let cut = sectionX(middle: (x0 + x1) / 2, walls: document.walls) else { return nil }
+        let roof = mainRoofBox(document)
+        if let roof, roof.y1 - roof.y0 > roof.x1 - roof.x0 {
+            // The south-to-north rule with x and y swapped.
+            let swapped = document.walls.map { wall -> Wall in
+                var turned = wall
+                turned.start = Point2(x: wall.start.y, y: wall.start.x)
+                turned.end = Point2(x: wall.end.y, y: wall.end.x)
+                return turned
+            }
+            guard let cut = sectionX(middle: (roof.y0 + roof.y1) / 2, walls: swapped) else { return nil }
+            let y = Length(ticks: cut)
+            return SectionLine(start: Point2(x: Length(ticks: x0 - foot), y: y),
+                               end: Point2(x: Length(ticks: x1 + foot), y: y))
+        }
+        let middle = roof.map { ($0.x0 + $0.x1) / 2 } ?? (x0 + x1) / 2
+        guard let cut = sectionX(middle: middle, walls: document.walls) else { return nil }
         let x = Length(ticks: cut)
         return SectionLine(start: Point2(x: x, y: Length(ticks: y0 - foot)),
                            end: Point2(x: x, y: Length(ticks: y1 + foot)))
+    }
+
+    /// The box around the largest roof's footprint, by that box's area; nil with no roof.
+    static func mainRoofBox(_ document: ModelDocument) -> (x0: Int64, x1: Int64, y0: Int64, y1: Int64)? {
+        let boxes = document.roofs.compactMap { roof -> (x0: Int64, x1: Int64, y0: Int64, y1: Int64)? in
+            let xs = roof.footprint.map(\.x.ticks), ys = roof.footprint.map(\.y.ticks)
+            guard let x0 = xs.min(), let x1 = xs.max(), let y0 = ys.min(), let y1 = ys.max() else { return nil }
+            return (x0, x1, y0, y1)
+        }
+        func area(_ box: (x0: Int64, x1: Int64, y0: Int64, y1: Int64)) -> Double {
+            Double(box.x1 - box.x0) * Double(box.y1 - box.y0)
+        }
+        return boxes.max { area($0) < area($1) }
     }
 
     /// Where a south-to-north cut goes near `middle`, clear of running down a north-south wall.
@@ -235,7 +265,10 @@ public struct SchematicDrawingSet: DrawingGenerator {
             let meshes = try geometry.meshes(of: document)
             let roofMeshes = meshes.filter { mesh in mesh.elementID.map { roofIDs.contains($0) } ?? false }
             let slabMeshes = meshes.filter { mesh in mesh.elementID.map { slabIDs.contains($0) } ?? false }
-            guard let extent = ElevationView.extent(document, direction, roofMeshes: roofMeshes) else {
+            // Drawn from the meshes, an elevation needs no wall square to it: any house has one.
+            let found = meshes.isEmpty ? ElevationView.extent(document, direction, roofMeshes: roofMeshes)
+                : ElevationView.meshExtent(document, direction, meshes: meshes)
+            guard let extent = found else {
                 return missing(name)
             }
             let placed = Self.place(extent: extent, in: slot, sheetScale: sheet.scale,
@@ -244,7 +277,7 @@ public struct SchematicDrawingSet: DrawingGenerator {
             let under = paperPoint(placed.transform.paperOrigin.x.ticks,
                                    placed.transform.paperOrigin.y.ticks - mmTicks(10))
             let items = ElevationView.items(document, direction, view: placed.transform, roofMeshes: roofMeshes,
-                                            slabMeshes: slabMeshes)
+                                            slabMeshes: slabMeshes, meshes: meshes)
                 + SheetFrame.viewTitle(name, scale: scale, at: placed.fits ? under : titleAt)
             return ViewDrawing(items: items, scale: scale)
         case let .schedule(kind):
@@ -297,8 +330,17 @@ public struct SchematicDrawingSet: DrawingGenerator {
                 + SheetFrame.viewTitle("Site Plan", scale: scale, at: titleAt)
             return ViewDrawing(items: items, scale: scale)
         case let .section(line):
-            let outlines = try geometry.section(of: document, along: line)
-            guard let extent = SectionView.extent(outlines) else {
+            var outlines = try geometry.section(of: document, along: line)
+            // What lies beyond the cut comes from the meshes with hidden lines removed, when the engine gives them.
+            // Below the lowest floor, not below grade: a section shows a basement.
+            let grade = document.storeys.map(\.elevation.ticks).min() ?? 0
+            let meshes = try geometry.meshes(of: document)
+            var beyond: [HiddenLines.Segment] = []
+            if !outlines.isEmpty, !meshes.isEmpty, let projection = ElevationView.lines(line) {
+                beyond = ElevationView.visibleSegments(meshes, view: projection, grade: grade, near: 0)
+                outlines.removeAll { $0.classification != .cut }
+            }
+            guard let extent = SectionView.extent(outlines, beyond: beyond) else {
                 return missing("Section line crosses nothing")
             }
             let placed = Self.place(extent: extent, in: slot, sheetScale: sheet.scale,
@@ -306,7 +348,9 @@ public struct SchematicDrawingSet: DrawingGenerator {
             let scale = placed.transform.scale
             let under = paperPoint(placed.transform.paperOrigin.x.ticks,
                                    placed.transform.paperOrigin.y.ticks - mmTicks(10))
-            let items = SectionView.items(outlines, view: placed.transform)
+            let items = ElevationView.lineItems(beyond, transform: placed.transform, openings: [],
+                                                beyond: SectionView.beyondStyle)
+                + SectionView.items(outlines, view: placed.transform)
                 + SectionView.annotations(document, extent: extent, view: placed.transform, units: units)
                 + SheetFrame.viewTitle("Building Section", scale: scale, at: placed.fits ? under : titleAt)
             return ViewDrawing(items: items, scale: scale)

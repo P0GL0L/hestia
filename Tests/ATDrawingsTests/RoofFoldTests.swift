@@ -73,15 +73,36 @@ private func runs(_ line: (Point2, Point2), _ a: (Int64, Int64), _ b: (Int64, In
     #expect(folds(document, .west, meshes).isEmpty)
 }
 
-@Test func elevationSheetDrawsTheFoldThin() throws {
+@Test func elevationDrawsTheValleyWhereItIsSeen() throws {
     var document = try fixture("l-house")
+    let meshes = try HestiaGeometryEngine().meshes(of: document)
+    // From the east the valley rises from the 5500 mm eave at h = 6450 mm to 6975 mm at h = 3500 mm, drawn as an
+    // edge in front of the roof beyond; from the south it is behind the wing's slope and drawn nowhere.
+    func valleys(_ direction: ElevationDirection) -> [HiddenLines.Segment] {
+        ElevationView.visibleSegments(meshes, view: ElevationView.lines(direction), grade: 0).filter { segment in
+            guard segment.kind != .profile else { return false }
+            let (dh, dz) = (segment.end.h - segment.start.h, segment.end.v - segment.start.v)
+            return abs(dh) > 1 && abs(dz) > 1 && abs(abs(dz / dh) - 1475.0 / 2950.0) < 0.02
+        }
+    }
+    let inch = Double(Length.inches(1).ticks)
+    let east = valleys(.east)
+    let ends: [(h: Double, v: Double)] = east.flatMap { [$0.start, $0.end] }
+    let lowH: Double = ends.map(\.h).max() ?? 0
+    let highV: Double = ends.map(\.v).max() ?? 0
+    let eaveH = Double(Length.millimeters(6450).ticks), ridgeV = Double(Length.millimeters(6975).ticks)
+    let lowError: Double = abs(lowH - eaveH), highError: Double = abs(highV - ridgeV), slack: Double = 2 * inch
+    #expect(lowError < slack)
+    #expect(highError < slack)
+    #expect(valleys(.south).isEmpty)
+
     document.sheets = [Sheet(id: SheetID(UUID()), number: "A-201", title: "East", paper: .archD, scale: .quarterInch,
                              views: [.elevation(direction: .east)])]
     let sheet = try #require(try SchematicDrawingSet().sheets(for: document, geometry: HestiaGeometryEngine()).first)
-    let foldItems = sheet.content.items.filter { $0.style == ElevationView.foldStyle }
-    #expect(foldItems.count == 1)
-    #expect(foldItems.allSatisfy { $0.elementID == document.roofs[0].id.rawValue })
-    // Without a roof mesh there are no folds to draw.
+    let items = sheet.content.items
+    #expect(items.contains { $0.style == ElevationView.foldStyle && $0.elementID == document.roofs[0].id.rawValue })
+    #expect(items.contains { $0.style == ElevationView.profileStyle })
+    // Without meshes there are no folds to draw.
     let mock = try #require(try SchematicDrawingSet().sheets(for: document, geometry: MockGeometryEngine()).first)
     #expect(!mock.content.items.contains { $0.style == ElevationView.foldStyle })
 }
