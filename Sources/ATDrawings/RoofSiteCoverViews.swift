@@ -289,38 +289,51 @@ enum SitePlanView {
                 items += sideLengths(patch.boundary, view: view, units: units, taken: &labels)
             }
         }
-        // The building hatched as one area, then every loop outlined. A hole the roof covers is a space inside
+        // The building outlined, every loop, and the drip line dashed. A hole the roof covers is a space inside
         // with no room drawn, and is filled; one open to the sky, a courtyard, is left open.
         let drip = dripLine(document, roofMeshes: roofMeshes)
-        let paperLoops = footprints.filter { loop in
-            signedTwiceArea(loop) >= 0 || !covered(loop, by: drip)
-        }.map { $0.map { view.paper($0) } }
-        for (start, end) in hatchLines(paperLoops, spacing: mmTicks(2)) {
-            items.append(DisplayItem(.line(start: start, end: end), style: patternStyle))
-        }
+        let shown = footprints.filter { loop in signedTwiceArea(loop) >= 0 || !covered(loop, by: drip) }
+        let paperLoops = shown.map { $0.map { view.paper($0) } }
         for paper in paperLoops {
             items.append(DisplayItem(.polyline(points: paper, closed: true), style: buildingStyle))
         }
         for outline in drip {
             items.append(DisplayItem(.polyline(points: outline.map { view.paper($0) }, closed: true), style: roofStyle))
         }
-        // Names inside their areas, the building's first, each clear of the labels already placed, of the
-        // building, and of the smaller areas inside its own.
-        let courtyards = footprints.filter { signedTwiceArea($0) < 0 && !covered($0, by: drip) }
-        if let biggest = footprints.max(by: { Self.area($0) < Self.area($1) }) {
-            items += place(document.project.name.uppercased(), inside: biggest, avoiding: courtyards, view: view,
-                           taken: &labels)
-        }
-        let patches = document.terrainPatches.sorted { Self.area($0.boundary) < Self.area($1.boundary) }
-        for (index, patch) in patches.enumerated() {
-            let smaller = patches[..<index].map(\.boundary)
-            items += place(patch.name.uppercased(), inside: patch.boundary, avoiding: footprints + smaller,
-                           view: view, taken: &labels)
-        }
+        // The north arrow first, so no name is set under it. Then names where they have room (LabelSpace),
+        // each left out when it has none: the building's first, inside it and out of any courtyard; the hatch
+        // then stops short of it, as a drafter masks a name. Then each area's name inside it, clear of
+        // everything drawn and of the smaller areas and building within it, the smallest areas first.
         items.append(DisplayItem(.symbol(name: "north-arrow", position: paperPoint(area.maxX - mmTicks(20),
                                                                                     area.maxY - mmTicks(20)),
                                          rotation: .degrees(0), size: .millimeters(16)),
                                  style: DisplayStyle(layer: "A-ANNO-SYMB", pen: .thin)))
+        var space = LabelSpace(items, scale: view.scale)
+        let courtyards = shown.filter { signedTwiceArea($0) < 0 }
+        var name: [DisplayItem] = []
+        if let biggest = shown.max(by: { Self.area($0) < Self.area($1) }) {
+            name = space.place(labelCandidates(document.project.name.uppercased(), inside: biggest,
+                                               avoiding: courtyards, view: view),
+                               within: biggest.map { view.paper($0) })
+        }
+        let masks = DrawingAudit.parts(name, scale: view.scale).labels.map {
+            DrawingAudit.inset($0.box, by: -Double(mmTicks(1)))
+        }
+        var hatch: [DisplayItem] = []
+        for (start, end) in hatchLines(paperLoops, spacing: mmTicks(2)) {
+            for piece in outside(start, end, masks) {
+                hatch.append(DisplayItem(.line(start: piece.0, end: piece.1), style: patternStyle))
+            }
+        }
+        space.add(hatch)
+        items += hatch + name
+        let patches = document.terrainPatches.sorted { Self.area($0.boundary) < Self.area($1.boundary) }
+        for (index, patch) in patches.enumerated() {
+            let smaller = patches[..<index].map(\.boundary)
+            items += space.place(labelCandidates(patch.name.uppercased(), inside: patch.boundary,
+                                                 avoiding: footprints + smaller, view: view),
+                                 within: patch.boundary.map { view.paper($0) })
+        }
         return items
     }
 
@@ -489,40 +502,53 @@ enum SitePlanView {
         return items
     }
 
-    /// A name at the point nearest the middle of an area whose label box lies inside it, clear of the labels
-    /// already placed and of every `avoiding` area; or nothing when no such point is found.
-    static func place(_ name: String, inside boundary: [Point2], avoiding: [[Point2]], view: ViewTransform,
-                      taken: inout [PaperRect]) -> [DisplayItem] {
+    /// A name at points across an area, nearest its middle first, at the site plan's text size and then
+    /// smaller, leaving out points inside any of the `avoiding` areas.
+    static func labelCandidates(_ name: String, inside boundary: [Point2], avoiding: [[Point2]],
+                                view: ViewTransform) -> [[DisplayItem]] {
         let paper = boundary.map { view.paper($0) }
         let xs = paper.map { Double($0.x.ticks) }, ys = paper.map { Double($0.y.ticks) }
         guard let x0 = xs.min(), let x1 = xs.max(), let y0 = ys.min(), let y1 = ys.max() else { return [] }
         let obstacles = avoiding.map { area in
             (area.map { Double(view.paper($0).x.ticks) }, area.map { Double(view.paper($0).y.ticks) })
         }
-        // Capitals run about 0.8 of their height wide; a little more keeps neighbours apart.
-        let height = Double(mmTicks(5) / 2), width = height * 0.85 * Double(name.count) + height
-        var best: (score: Double, x: Double, y: Double)?
-        for row in 1..<16 {
-            for column in 1..<16 {
-                let x = x0 + (x1 - x0) * Double(column) / 16, y = y0 + (y1 - y0) * Double(row) / 16
-                let box = PaperRect(minX: Int64(x - width / 2), minY: Int64(y - height / 2), width: Int64(width),
-                                    height: Int64(height * 1.6))
-                let corners = [(box.minX, box.minY), (box.maxX, box.minY), (box.maxX, box.maxY), (box.minX, box.maxY)]
-                let points = corners.map { (Double($0.0), Double($0.1)) } + [(x, y)]
-                guard points.allSatisfy({ RasterOutline.inside($0.0, $0.1, xs, ys) }),
-                      !points.contains(where: { point in
-                          obstacles.contains { RasterOutline.inside(point.0, point.1, $0.0, $0.1) }
-                      }),
-                      !taken.contains(where: { $0.intersects(box) }) else { continue }
-                // Prefer the middle.
-                let score = -abs(x - (x0 + x1) / 2) - abs(y - (y0 + y1) / 2)
-                if score > (best?.score ?? -.infinity) { best = (score, x, y) }
+        var points: [(x: Double, y: Double)] = []
+        for row in 1..<24 {
+            for column in 1..<24 {
+                let x = x0 + (x1 - x0) * Double(column) / 24, y = y0 + (y1 - y0) * Double(row) / 24
+                guard RasterOutline.inside(x, y, xs, ys),
+                      !obstacles.contains(where: { RasterOutline.inside(x, y, $0.0, $0.1) }) else { continue }
+                points.append((x, y))
             }
         }
-        guard let best else { return [] }
-        taken.append(PaperRect(minX: Int64(best.x - width / 2), minY: Int64(best.y - height / 2),
-                               width: Int64(width), height: Int64(height * 1.6)))
-        return [RoofPlanView.label(name, at: paperPoint(Int64(best.x), Int64(best.y)))]
+        let (mx, my) = ((x0 + x1) / 2, (y0 + y1) / 2)
+        points.sort { abs($0.x - mx) + abs($0.y - my) < abs($1.x - mx) + abs($1.y - my) }
+        let large = points.map { point in
+            [RoofPlanView.label(name, at: paperPoint(Int64(point.x), Int64(point.y - Double(mmTicks(1)))))]
+        }
+        let small = points.map { point in
+            [DisplayItem(.text(position: paperPoint(Int64(point.x), Int64(point.y - Double(mmTicks(1)))),
+                               string: name, height: .millimeters(2), rotation: .degrees(0), alignment: .center),
+                         style: RoofPlanView.textStyle)]
+        }
+        return large + small
+    }
+
+    /// The parts of a line from `a` to `b` outside every box.
+    static func outside(_ a: Point2, _ b: Point2, _ boxes: [DrawingAudit.Box]) -> [(Point2, Point2)] {
+        var pieces: [(Double, Double)] = [(0, 1)]
+        let (ax, ay) = (Double(a.x.ticks), Double(a.y.ticks)), (bx, by) = (Double(b.x.ticks), Double(b.y.ticks))
+        for box in boxes {
+            // The stretch of the line, as shares from a to b, inside this box.
+            guard let inside = DrawingAudit.clip((ax, ay), (bx, by), box) else { continue }
+            pieces = pieces.flatMap { piece -> [(Double, Double)] in
+                [(piece.0, min(piece.1, inside.0)), (max(piece.0, inside.1), piece.1)].filter { $0.1 - $0.0 > 1e-6 }
+            }
+        }
+        func at(_ t: Double) -> Point2 {
+            paperPoint(Int64((ax + (bx - ax) * t).rounded()), Int64((ay + (by - ay) * t).rounded()))
+        }
+        return pieces.map { (at($0.0), at($0.1)) }
     }
 }
 

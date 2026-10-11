@@ -26,9 +26,11 @@ enum FloorPlanView {
         return (paperPoint(xs.min()! - half, ys.min()! - half), paperPoint(xs.max()! + half, ys.max()! + half))
     }
 
+    /// The plan's drawing. With `labels` false, the room tags and opening marks are left out, for `PlanLabels`
+    /// to place where they have room.
     static func items(
         document: ModelDocument, storey: StoreyID, outlines: [ClassifiedOutline], areas: [RoomID: Area],
-        view: ViewTransform, stairsBelow: [ClassifiedOutline] = []
+        view: ViewTransform, stairsBelow: [ClassifiedOutline] = [], labels: Bool = true
     ) -> [DisplayItem] {
         var items: [DisplayItem] = []
         let hatchSpacing = Length.millimeters(1)
@@ -55,35 +57,98 @@ enum FloorPlanView {
         for opening in document.openings {
             guard let wall = walls[opening.wallID], wall.storeyID == storey else { continue }
             items += symbol(for: opening, in: wall, view: view)
-            if let mark = marks[opening.id] { items.append(tag(mark, for: opening, in: wall, view: view)) }
+            if labels, let mark = marks[opening.id] { items.append(tag(mark, for: opening, in: wall, view: view)) }
         }
-        let units = DrawingUnits.style(document, scale: view.scale)
-        let imperial = units == .feetInchesFractions
+        guard labels else { return items }
         for room in document.rooms where room.storeyID == storey {
-            let boundary = room.boundaryWallIDs.compactMap { walls[$0] }
-            guard let polygon = roomPolygon(boundary) else { continue }
-            let center = view.paper(centroid(polygon))
-            func line(_ drop: Int64) -> Point2 { Point2(x: center.x, y: Length(ticks: center.y.ticks - mmTicks(drop))) }
-            items.append(DisplayItem(.text(position: center, string: room.name.uppercased(), height: .millimeters(3),
-                                           rotation: .degrees(0), alignment: .center),
-                                     style: roomStyle, elementID: room.id.rawValue))
-            // The clear size takes the line under the name; the area then moves down a line.
-            var areaDrop: Int64 = 5
-            if let size = clearSize(polygon, boundary: boundary) {
-                let text = DrawingUnits.label(size.width, style: units) + " x " + DrawingUnits.label(size.depth, style: units)
-                items.append(DisplayItem(.text(position: line(5), string: text, height: .millimeters(2),
-                                               rotation: .degrees(0), alignment: .center),
-                                         style: roomStyle, elementID: room.id.rawValue))
-                areaDrop = 9
-            }
-            if let area = areas[room.id] {
-                items.append(DisplayItem(
-                    .text(position: line(areaDrop), string: areaLabel(area, imperial: imperial),
-                          height: .millimeters(2), rotation: .degrees(0), alignment: .center),
-                    style: roomStyle, elementID: room.id.rawValue))
+            if let tag = roomTag(room, document: document, areas: areas, view: view) {
+                items += tag.lines(.full, at: (0, 0))
             }
         }
         return items
+    }
+
+    /// How much of a room's tag is set, and how.
+    enum RoomTagForm: CaseIterable {
+        /// Name, size, and area.
+        case full
+        /// Name and area.
+        case nameAndArea
+        /// The name alone.
+        case name
+        /// The name alone, in smaller letters.
+        case smallName
+        /// The name turned to read up the room, for a narrow room.
+        case turnedName
+        /// The name's words one under another, in smaller letters.
+        case stackedName
+        /// The name turned, in smaller letters.
+        case smallTurnedName
+    }
+
+    /// A room's tag: its name, its clear size when it is a box, and its area, centred on the room, ready to be
+    /// set in full or shortened and moved by `lines`.
+    struct RoomTag {
+        var id: UUID
+        var center: Point2
+        var name: String
+        var size: String?
+        var area: String?
+        /// The room's centerline outline on paper.
+        var outline: [Point2]
+
+        /// The tag's lines in `form`, moved by `shift` (paper ticks). The clear size takes the line under the
+        /// name; the area then moves down a line.
+        func lines(_ form: RoomTagForm, at shift: (x: Int64, y: Int64)) -> [DisplayItem] {
+            let x = center.x.ticks + shift.x, y = center.y.ticks + shift.y
+            func text(_ string: String, drop: Int64, height: Int64) -> DisplayItem {
+                DisplayItem(.text(position: paperPoint(x, y - mmTicks(drop)), string: string,
+                                  height: .millimeters(height), rotation: .degrees(0), alignment: .center),
+                            style: roomStyle, elementID: id)
+            }
+            switch form {
+            case .full:
+                var items = [text(name, drop: 0, height: 3)]
+                if let size { items.append(text(size, drop: 5, height: 2)) }
+                if let area { items.append(text(area, drop: size == nil ? 5 : 9, height: 2)) }
+                return items
+            case .nameAndArea:
+                return [text(name, drop: 0, height: 3)] + (area.map { [text($0, drop: 5, height: 2)] } ?? [])
+            case .name:
+                return [text(name, drop: 0, height: 3)]
+            case .smallName:
+                return [text(name, drop: 0, height: 2)]
+            case .turnedName, .smallTurnedName:
+                let height: Int64 = form == .turnedName ? 3 : 2
+                return [DisplayItem(.text(position: paperPoint(x + mmTicks(height) / 2, y), string: name,
+                                          height: .millimeters(height), rotation: .degrees(90), alignment: .center),
+                                    style: roomStyle, elementID: id)]
+            case .stackedName:
+                let words = name.split(separator: " ").map(String.init)
+                let first: Int64 = -Int64(words.count - 1) * 3 / 2
+                var items: [DisplayItem] = []
+                for (index, word) in words.enumerated() {
+                    let drop: Int64 = first + Int64(index) * 3
+                    items.append(text(word, drop: drop, height: 2))
+                }
+                return items
+            }
+        }
+    }
+
+    /// The tag for a room whose walls make an outline; nil otherwise.
+    static func roomTag(_ room: Room, document: ModelDocument, areas: [RoomID: Area], view: ViewTransform)
+        -> RoomTag? {
+        let walls = Dictionary(uniqueKeysWithValues: document.walls.map { ($0.id, $0) })
+        let boundary = room.boundaryWallIDs.compactMap { walls[$0] }
+        guard let polygon = roomPolygon(boundary) else { return nil }
+        let units = DrawingUnits.style(document, scale: view.scale)
+        let size = clearSize(polygon, boundary: boundary).map {
+            DrawingUnits.label($0.width, style: units) + " x " + DrawingUnits.label($0.depth, style: units)
+        }
+        let area = areas[room.id].map { areaLabel($0, imperial: units == .feetInchesFractions) }
+        return RoomTag(id: room.id.rawValue, center: view.paper(centroid(polygon)), name: room.name.uppercased(),
+                       size: size, area: area, outline: polygon.map { view.paper($0) })
     }
 
     /// The room's centerline polygon: where each boundary wall's line meets the next one's, walking around
@@ -225,15 +290,18 @@ enum FloorPlanView {
         return items
     }
 
-    /// The schedule mark, set just outside the wall's right face at the opening's middle.
-    static func tag(_ mark: String, for opening: Opening, in wall: Wall, view: ViewTransform) -> DisplayItem {
+    /// The schedule mark, set just outside the wall's right face at the opening's middle; or, for `PlanLabels`
+    /// looking for room, `beyond` millimetres off the face on the given `side` (1 right, -1 left), moved `along`
+    /// the wall by that share of the opening's width.
+    static func tag(_ mark: String, for opening: Opening, in wall: Wall, view: ViewTransform, side: Double = 1,
+                    beyond: Int64 = 4, along shift: Double = 0) -> DisplayItem {
         let sx = Double(wall.start.x.ticks), sy = Double(wall.start.y.ticks)
         let dx = Double(wall.end.x.ticks) - sx, dy = Double(wall.end.y.ticks) - sy
         let length = max((dx * dx + dy * dy).squareRoot(), 1)
         let (ux, uy) = (dx / length, dy / length)
-        let along = Double(opening.offsetAlongWall.ticks + opening.width.ticks / 2)
-        let across = -(Double(wall.thickness.ticks) / 2
-            + Double(mmTicks(4) * view.scale.modelUnitsPerPaperUnit))
+        let along = Double(opening.offsetAlongWall.ticks) + Double(opening.width.ticks) * (0.5 + shift)
+        let across = -side * (Double(wall.thickness.ticks) / 2
+            + Double(mmTicks(beyond) * view.scale.modelUnitsPerPaperUnit))
         let anchor = view.paper(paperPoint(Int64((sx + ux * along + uy * -across).rounded()),
                                            Int64((sy + uy * along - ux * -across).rounded())))
         return DisplayItem(.text(position: Point2(x: anchor.x, y: Length(ticks: anchor.y.ticks - mmTicks(1))),
