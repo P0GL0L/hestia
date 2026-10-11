@@ -3,7 +3,8 @@ import Foundation
 
 /// A dimension whose figure is wider than its own span, as on a short step in a chain, would print its figure
 /// over its ticks and the next dimension's. As a drafter does, the figure moves: out a line from the chain, or
-/// past the end of the span, wherever it is clear; the dimension's lines stay where they are.
+/// past the end of the span, wherever it is clear; the dimension's lines stay where they are. A dimension whose
+/// figure has no clear place is left out whole, rather than drawn with its figure over the drawing or without it.
 enum DimensionText {
     static func fit(_ items: [DisplayItem], scale: DrawingScale?) -> [DisplayItem] {
         let height = Length.millimeters(2)
@@ -33,6 +34,7 @@ enum DimensionText {
         }
         var space = LabelSpace(result, scale: scale)
         var added: [DisplayItem] = []
+        var dropped: Set<Int> = []
         for entry in moved {
             guard case let .dimension(from, to, _, _) = entry.item.primitive else { continue }
             let (x0, y0) = (Double(from.x.ticks), Double(from.y.ticks))
@@ -60,8 +62,10 @@ enum DimensionText {
                                           alignment: .center),
                                     style: entry.item.style, elementID: entry.item.elementID)]
             }
-            added += space.place(candidates, required: true)
+            let placed = space.place(candidates)
+            if placed.isEmpty { dropped.insert(entry.index) }
+            added += placed
         }
-        return result + added
+        return result.indices.filter { !dropped.contains($0) }.map { result[$0] } + added
     }
 }

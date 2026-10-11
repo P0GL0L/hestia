@@ -86,21 +86,14 @@ struct LabelSpace {
         return ((d1 > 0) != (d2 > 0) || d1 == 0 || d2 == 0) && ((d3 > 0) != (d4 > 0) || d3 == 0 || d4 == 0)
     }
 
-    /// The first clear candidate, added to the space; else, when `required`, the one running into least; else
-    /// nothing.
-    mutating func place(_ candidates: [[DisplayItem]], within: [Point2]? = nil, crossing: Set<String> = [],
-                        required: Bool) -> [DisplayItem] {
-        var best: (items: [DisplayItem], count: Int)?
-        for candidate in candidates {
-            let count = collisions(candidate, within: within, crossing: crossing)
-            if count == 0 {
-                add(candidate)
-                return candidate
-            }
-            if count < (best?.count ?? .max) { best = (candidate, count) }
+    /// The first clear candidate, added to the space; nothing when none is clear. A label that cannot clear the
+    /// drawing is left out rather than set over it.
+    mutating func place(_ candidates: [[DisplayItem]], within: [Point2]? = nil,
+                        crossing: Set<String> = []) -> [DisplayItem] {
+        for candidate in candidates where collisions(candidate, within: within, crossing: crossing) == 0 {
+            add(candidate)
+            return candidate
         }
-        guard required, let chosen = best?.items else { return [] }
-        add(chosen)
-        return chosen
+        return []
     }
 }

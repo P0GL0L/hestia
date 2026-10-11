@@ -3,8 +3,8 @@ import Foundation
 
 /// Checks a drawn sheet the way a checker reads a blueprint: every piece of text must stand clear of the drawing
 /// and of other text. Each label's box is measured exactly as the PDF sets it (Helvetica's widths, the cap height
-/// the drawing asks for, its alignment and turn), and any line, arc, dimension, symbol, or hatched area that
-/// crosses it, or another label's box that overlaps it, is a finding.
+/// the drawing asks for, its alignment and turn), and any line, arc, or dimension that crosses it, any hatched
+/// area or symbol it lies over (a symbol fills its disk), or another label's box that overlaps it, is a finding.
 ///
 /// Placement uses the same geometry (see `LabelSpace`), so labels can look for room before they are drawn.
 enum DrawingAudit {
@@ -33,10 +33,11 @@ enum DrawingAudit {
         var elementID: UUID?
     }
 
-    /// A hatched area, as its boundary on paper.
+    /// A hatched area, or the disk a symbol fills, as its boundary on paper.
     struct Area {
         var boundary: [(x: Double, y: Double)]
         var layer: String
+        var isSymbol = false
     }
 
     struct Finding: CustomStringConvertible, Equatable {
@@ -110,15 +111,15 @@ enum DrawingAudit {
                 for (a, b) in parts.strokes { stroke(a, b) }
                 labels.append(Label(string: parts.label.string, box: parts.label.box, layer: layer, elementID: id))
             case let .symbol(_, position, _, size):
-                // The symbol's ring stands for all of it.
+                // The symbol's disk stands for all of it: text crossing its ring or sitting inside it is over it.
                 let (cx, cy) = xy(position), r = Double(size.ticks) / 2
-                var previous = (cx + r, cy)
-                for step in 1...16 {
+                var ring: [(x: Double, y: Double)] = []
+                for step in 0..<16 {
                     let t = Double(step) / 16 * 2 * .pi
-                    let next = (cx + r * cos(t), cy + r * sin(t))
-                    stroke(previous, next)
-                    previous = next
+                    ring.append((cx + r * cos(t), cy + r * sin(t)))
                 }
+                for (index, point) in ring.enumerated() { stroke(point, ring[(index + 1) % ring.count]) }
+                areas.append(Area(boundary: ring, layer: layer, isSymbol: true))
             }
         }
         return (labels, strokes, areas)
@@ -246,7 +247,8 @@ enum DrawingAudit {
                 result.append(Finding(label: label.string, layer: label.layer, other: "\(hit.layer) linework"))
             }
             if let hit = areas.first(where: { over(box, $0) }) {
-                result.append(Finding(label: label.string, layer: label.layer, other: "\(hit.layer) hatch"))
+                result.append(Finding(label: label.string, layer: label.layer,
+                                      other: "\(hit.layer) " + (hit.isSymbol ? "symbol" : "hatch")))
             }
             for other in labels[(index + 1)...] where overlaps(box, inset(other.box, by: slack)) {
                 result.append(Finding(label: label.string, layer: label.layer, other: "\"\(other.string)\""))

@@ -7,6 +7,7 @@ import Foundation
 /// - Each opening's mark goes just outside its wall, else just inside, else a little further off or along.
 /// - Each room's tag goes at its middle, else nearby within the room. When it cannot fit whole, it drops its
 ///   size line, then its area, then sets the name smaller.
+/// - A mark or tag with no clear place at all is left out: the sheet never prints text over the drawing.
 /// - Each box room's clear width and depth go a quarter of the way across it, else at other places across it,
 ///   their lines clear of door swings, windows, stairs, walls, and other dimensions. With no clear place they
 ///   are left out, since the tag already gives the size.
@@ -30,7 +31,7 @@ enum PlanLabels {
                     }
                 }
             }
-            items += space.place(candidates, required: true)
+            items += space.place(candidates)
         }
         let rooms = document.rooms.filter { $0.storeyID == storey }
         for room in rooms {
@@ -41,14 +42,14 @@ enum PlanLabels {
             for form in FloorPlanView.RoomTagForm.allCases {
                 for shift in shifts() { candidates.append(tag.lines(form, at: shift)) }
             }
-            items += space.place(candidates, within: tag.outline, required: true)
+            items += space.place(candidates, within: tag.outline)
         }
         for room in rooms {
             let (width, depth) = DimensionChains.interiorCandidates(room, document: document, view: view, units: units)
             // Kept off door swings, windows, stairs, walls, and other dimensions.
             let crossing: Set<String> = ["A-DOOR", "A-GLAZ", "A-FLOR-STRS", "A-FLOR-OPNG", "A-WALL", "A-ANNO-DIMS"]
-            items += space.place(width, crossing: crossing, required: false)
-            items += space.place(depth, crossing: crossing, required: false)
+            items += space.place(width, crossing: crossing)
+            items += space.place(depth, crossing: crossing)
         }
         return items
     }

@@ -300,16 +300,21 @@ enum SitePlanView {
         for outline in drip {
             items.append(DisplayItem(.polyline(points: outline.map { view.paper($0) }, closed: true), style: roofStyle))
         }
-        // Names where they have room (LabelSpace): the building's first, inside it and out of any courtyard;
-        // the hatch then stops short of it, as a drafter masks a name. Then each area's name inside it, clear
-        // of everything drawn and of the smaller areas and building within it, the smallest areas first.
+        // The north arrow first, so no name is set under it. Then names where they have room (LabelSpace),
+        // each left out when it has none: the building's first, inside it and out of any courtyard; the hatch
+        // then stops short of it, as a drafter masks a name. Then each area's name inside it, clear of
+        // everything drawn and of the smaller areas and building within it, the smallest areas first.
+        items.append(DisplayItem(.symbol(name: "north-arrow", position: paperPoint(area.maxX - mmTicks(20),
+                                                                                    area.maxY - mmTicks(20)),
+                                         rotation: .degrees(0), size: .millimeters(16)),
+                                 style: DisplayStyle(layer: "A-ANNO-SYMB", pen: .thin)))
         var space = LabelSpace(items, scale: view.scale)
         let courtyards = shown.filter { signedTwiceArea($0) < 0 }
         var name: [DisplayItem] = []
         if let biggest = shown.max(by: { Self.area($0) < Self.area($1) }) {
             name = space.place(labelCandidates(document.project.name.uppercased(), inside: biggest,
                                                avoiding: courtyards, view: view),
-                               within: biggest.map { view.paper($0) }, required: true)
+                               within: biggest.map { view.paper($0) })
         }
         let masks = DrawingAudit.parts(name, scale: view.scale).labels.map {
             DrawingAudit.inset($0.box, by: -Double(mmTicks(1)))
@@ -327,12 +332,8 @@ enum SitePlanView {
             let smaller = patches[..<index].map(\.boundary)
             items += space.place(labelCandidates(patch.name.uppercased(), inside: patch.boundary,
                                                  avoiding: footprints + smaller, view: view),
-                                 within: patch.boundary.map { view.paper($0) }, required: false)
+                                 within: patch.boundary.map { view.paper($0) })
         }
-        items.append(DisplayItem(.symbol(name: "north-arrow", position: paperPoint(area.maxX - mmTicks(20),
-                                                                                    area.maxY - mmTicks(20)),
-                                         rotation: .degrees(0), size: .millimeters(16)),
-                                 style: DisplayStyle(layer: "A-ANNO-SYMB", pen: .thin)))
         return items
     }
 
