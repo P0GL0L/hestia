@@ -65,7 +65,7 @@ private func count(_ sheet: SheetDrawing, layerPrefix: String) -> Int {
 @Test func wallsAddAnElevationsSheetWithAllFour() throws {
     let sheets = try draw(model(walls: true, roof: false))
     let numbers: [String] = sheets.map(\.number)
-    #expect(numbers == ["A-101", "A-201", "A-301"])
+    #expect(numbers == ["A-000", "A-101", "A-201", "A-301"])
     let elevations = try #require(sheets.first { $0.number == "A-201" })
     #expect(elevations.title == "Elevations")
     #expect(notGenerated(elevations).isEmpty)
@@ -80,7 +80,7 @@ private func count(_ sheet: SheetDrawing, layerPrefix: String) -> Int {
 @Test func aRoofAddsARoofPlan() throws {
     let sheets = try draw(model(walls: true, roof: true))
     let numbers: [String] = sheets.map(\.number)
-    #expect(numbers == ["A-101", "A-201", "A-301", "A-401"])
+    #expect(numbers == ["A-000", "A-101", "A-201", "A-301", "A-401"])
     let roofPlan = try #require(sheets.first { $0.number == "A-401" })
     #expect(roofPlan.title == "Roof Plan")
     #expect(notGenerated(roofPlan).isEmpty)
@@ -182,4 +182,64 @@ private func inches(_ feet: Int64, _ inches: Int64) -> Int64 { Length.feet(feet,
     let walls: [Wall] = [northSouth(ft(6), 0)]
     let x: Int64? = SchematicDrawingSet.sectionX(middle: ft(10).ticks, walls: walls)
     #expect(x == ft(10).ticks)
+}
+
+@Test func aSetOpensWithACoverThatIndexesItAndExplainsItsSymbols() throws {
+    let sheets = try draw(model(walls: true, roof: true))
+    let cover = try #require(sheets.first)
+    #expect(cover.number == "A-000" && cover.title == "Cover")
+    let words: [String] = cover.content.items.compactMap { item in
+        guard case let .text(_, string, _, _, _) = item.primitive else { return nil }
+        return string
+    }
+    for number in sheets.map(\.number) {
+        #expect(words.contains(number), "the cover indexes \(number)")
+    }
+    #expect(words.contains("SYMBOLS") && words.contains("ABBREVIATIONS"))
+    #expect(words.contains("WIC") && words.contains("Walk-in closet"))
+    #expect(cover.content.items.contains { if case .symbol("north-arrow", _, _, _) = $0.primitive { return true }
+        return false })
+}
+
+@Test func terrainAddsASitePlanAndOpeningsAddSchedules() throws {
+    var document = try model(walls: true, roof: false)
+    let wall = try #require(document.walls.first)
+    _ = try document.perform(batch: [
+        AddTerrainPatchCommand(terrainPatchID: TerrainPatchID(uuid(30)), name: "Lot",
+                               boundary: [pt(-20, -20), pt(40, -20), pt(40, 35), pt(-20, 35)], surveyPoints: []).erased,
+        AddOpeningCommand(openingID: OpeningID(uuid(31)), wallID: wall.id, offsetAlongWall: ft(2), width: ft(3),
+                          height: .inches(80), sillHeight: ft(0), kind: .singleDoor).erased,
+        AddOpeningCommand(openingID: OpeningID(uuid(32)), wallID: wall.id, offsetAlongWall: ft(10), width: ft(4),
+                          height: ft(4), sillHeight: ft(3), kind: .window).erased,
+    ])
+    let sheets = try draw(document)
+    #expect(sheets.map(\.number) == ["A-000", "A-001", "A-101", "A-201", "A-301", "A-601"])
+    let site = try #require(sheets.first { $0.number == "A-001" })
+    #expect(site.title == "Site Plan" && notGenerated(site).isEmpty)
+    let schedules = try #require(sheets.last)
+    let words: [String] = schedules.content.items.compactMap { item in
+        guard case let .text(_, string, _, _, _) = item.primitive else { return nil }
+        return string
+    }
+    #expect(words.contains("DOOR SCHEDULE") && words.contains("WINDOW SCHEDULE"))
+}
+
+@Test func aTitleBlockPrintsTheScaleItsViewsAreDrawnAt() throws {
+    // 120' of walls cannot sit on ARCH D at 1/4" = 1'-0", so the plan is drawn smaller, and the title block
+    // must say so rather than claim 1/4".
+    var document = try model(walls: false, roof: false)
+    let corners: [Point2] = [pt(0, 0), pt(120, 0), pt(120, 20), pt(0, 20)]
+    _ = try document.perform(batch: (0..<4).map { i in
+        AddWallCommand(wallID: WallID(uuid(40 + i)), storeyID: storey, start: corners[i], end: corners[(i + 1) % 4],
+                       thickness: .inches(6), height: ft(8)).erased
+    })
+    let plan = try #require(try draw(document).first { $0.number == "A-101" })
+    let scale = try #require(plan.scale)
+    #expect(scale != .quarterInch)
+    let words: [String] = plan.content.items.compactMap { item in
+        guard case let .text(_, string, _, _, _) = item.primitive else { return nil }
+        return string
+    }
+    #expect(words.contains(scale.label), "the title block prints \(scale.label)")
+    #expect(!words.contains(DrawingScale.quarterInch.label))
 }

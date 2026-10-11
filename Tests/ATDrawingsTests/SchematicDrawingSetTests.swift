@@ -172,10 +172,12 @@ private func sheet(_ number: String, _ sheets: [SheetDrawing]) throws -> SheetDr
     var document = try cottage()
     document.sheets = []
     let sheets = try SchematicDrawingSet().sheets(for: document, geometry: OutlinerGeometry())
-    // One plan per storey, then the elevations and section its walls give and the roof plan its roof gives.
+    // The cover; one plan per storey; the elevations and section its walls give and the roof plan its roof
+    // gives; and the schedules its doors and windows give.
     let numbers: [String] = sheets.map(\.number)
-    #expect(numbers == ["A-101", "A-201", "A-301", "A-401"])
-    #expect(sheets[0].paper == .archD && sheets[0].scale == .quarterInch)
+    #expect(numbers == ["A-000", "A-101", "A-201", "A-301", "A-401", "A-601"])
+    let plan = try #require(sheets.first { $0.number == "A-101" })
+    #expect(plan.paper == .archD && plan.scale == .quarterInch)
 }
 
 @Test func pdfExporterWritesOnePagePerSheet() throws {

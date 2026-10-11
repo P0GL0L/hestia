@@ -150,46 +150,329 @@ enum RoofPlanView {
     }
 }
 
-/// Site plan: property and terrain boundaries, the building footprint hatched, and a north arrow.
+/// Site plan: the lot as a property line with the length of each side, the other site areas, the building's
+/// footprint hatched (its real outline, traced from its ground-floor walls and rooms), the roofs' outline dashed
+/// beyond it, each area's name inside it where it does not collide with another, and a north arrow.
 enum SitePlanView {
     static let lineStyle = DisplayStyle(layer: "C-PROP", pen: .medium, pattern: .center)
+    static let areaStyle = DisplayStyle(layer: "C-SITE", pen: .thin)
     static let buildingStyle = DisplayStyle(layer: "A-AREA", pen: .heavy)
+    static let roofStyle = DisplayStyle(layer: "A-ROOF-OTLN", pen: .thin, pattern: .dashed)
 
-    static func footprint(_ document: ModelDocument) -> [Point2]? {
-        let ground = document.storeys.min { $0.elevation < $1.elevation }
-        guard let ground, let extent = FloorPlanView.extent(of: document, storey: ground.id) else { return nil }
-        return [extent.min, Point2(x: extent.max.x, y: extent.min.y), extent.max, Point2(x: extent.min.x, y: extent.max.y)]
+    /// The footprint of every building where it meets the ground: the outline of the walls and rooms of each
+    /// building's storey at grade, together, at 3" resolution. Loops wound clockwise are holes, such as a
+    /// courtyard.
+    static func footprint(_ document: ModelDocument) -> [[Point2]] {
+        let atGrade = Set(gradeStoreys(document))
+        guard !atGrade.isEmpty else { return [] }
+        var shapes: [[Point2]] = document.walls.filter { atGrade.contains($0.storeyID) }.map(wallOutline)
+        for room in document.rooms where atGrade.contains(room.storeyID) {
+            if let outline = RoomOutline.centerline(of: room, in: document) { shapes.append(outline) }
+        }
+        return RasterOutline.union(shapes, cell: Length.inches(3).ticks)
     }
 
-    static func extent(_ document: ModelDocument) -> (min: Point2, max: Point2)? {
-        let points = (footprint(document) ?? []) + document.terrainPatches.flatMap(\.boundary)
+    /// Each building's storey at grade: its lowest storey at or above zero, so a basement is passed over, or,
+    /// for a building wholly below zero, its highest.
+    static func gradeStoreys(_ document: ModelDocument) -> [StoreyID] {
+        let buildings: [BuildingID: [Storey]] = Dictionary(grouping: document.storeys, by: \.buildingID)
+        var result: [StoreyID] = []
+        for storeys in buildings.values {
+            let above: [Storey] = storeys.filter { $0.elevation.ticks >= 0 }
+            let lowest: Storey? = above.min { $0.elevation.ticks < $1.elevation.ticks }
+            if let storey = lowest ?? storeys.max(by: { $0.elevation.ticks < $1.elevation.ticks }) {
+                result.append(storey.id)
+            }
+        }
+        return result
+    }
+
+    /// A wall's plan rectangle, its centerline offset half its thickness each way.
+    static func wallOutline(_ wall: Wall) -> [Point2] {
+        let (ax, ay) = (Double(wall.start.x.ticks), Double(wall.start.y.ticks))
+        let (bx, by) = (Double(wall.end.x.ticks), Double(wall.end.y.ticks))
+        let length = max(((bx - ax) * (bx - ax) + (by - ay) * (by - ay)).squareRoot(), 1)
+        let half = Double(wall.thickness.ticks) / 2
+        let (nx, ny) = (-(by - ay) / length * half, (bx - ax) / length * half)
+        func point(_ x: Double, _ y: Double) -> Point2 { paperPoint(Int64(x.rounded()), Int64(y.rounded())) }
+        return [point(ax - nx, ay - ny), point(bx - nx, by - ny), point(bx + nx, by + ny), point(ax + nx, ay + ny)]
+    }
+
+    /// The site's extent: the lot and other areas, the building, and the roofs' drip line, with room around.
+    static func extent(_ document: ModelDocument, roofMeshes: [Mesh] = []) -> (min: Point2, max: Point2)? {
+        var points: [Point2] = footprint(document).flatMap { $0 }
+        points += document.terrainPatches.flatMap(\.boundary)
+        points += dripLine(document, roofMeshes: roofMeshes).flatMap { $0 }
         guard let x0 = points.map(\.x.ticks).min(), let x1 = points.map(\.x.ticks).max(),
               let y0 = points.map(\.y.ticks).min(), let y1 = points.map(\.y.ticks).max() else { return nil }
         let pad = Length.millimeters(3000).ticks
         return (paperPoint(x0 - pad, y0 - pad), paperPoint(x1 + pad, y1 + pad))
     }
 
-    static func items(_ document: ModelDocument, view: ViewTransform, area: PaperRect) -> [DisplayItem] {
+    static let patternStyle = DisplayStyle(layer: "A-AREA-PATT", pen: .extraFine)
+
+    static func items(_ document: ModelDocument, view: ViewTransform, area: PaperRect,
+                      units: LengthFormatStyle = .feetInchesFractions, roofMeshes: [Mesh] = []) -> [DisplayItem] {
         var items: [DisplayItem] = []
+        var labels: [PaperRect] = []
+        let footprints = footprint(document)
         for patch in document.terrainPatches {
+            let lot = SiteKindName.isLot(patch.name)
             items.append(DisplayItem(.polyline(points: patch.boundary.map { view.paper($0) }, closed: true),
-                                     style: lineStyle, elementID: patch.id.rawValue))
-            if let first = patch.boundary.first {
-                items.append(RoofPlanView.label(patch.name.uppercased(), at: view.paper(first)))
+                                     style: lot ? lineStyle : areaStyle, elementID: patch.id.rawValue))
+            if lot {
+                items += sideLengths(patch.boundary, view: view, units: units, taken: &labels)
             }
         }
-        if let footprint = footprint(document) {
-            let paper = footprint.map { view.paper($0) }
-            items.append(DisplayItem(.hatch(boundary: paper, pattern: .diagonal, spacing: .millimeters(2),
-                                            angle: .degrees(45)), style: DisplayStyle(layer: "A-AREA-PATT", pen: .extraFine)))
+        // The building hatched as one area, then every loop outlined. A hole the roof covers is a space inside
+        // with no room drawn, and is filled; one open to the sky, a courtyard, is left open.
+        let drip = dripLine(document, roofMeshes: roofMeshes)
+        let paperLoops = footprints.filter { loop in
+            signedTwiceArea(loop) >= 0 || !covered(loop, by: drip)
+        }.map { $0.map { view.paper($0) } }
+        for (start, end) in hatchLines(paperLoops, spacing: mmTicks(2)) {
+            items.append(DisplayItem(.line(start: start, end: end), style: patternStyle))
+        }
+        for paper in paperLoops {
             items.append(DisplayItem(.polyline(points: paper, closed: true), style: buildingStyle))
-            items.append(RoofPlanView.label(document.project.name.uppercased(), at: SheetFrame.center(of: paper)))
+        }
+        for outline in drip {
+            items.append(DisplayItem(.polyline(points: outline.map { view.paper($0) }, closed: true), style: roofStyle))
+        }
+        // Names inside their areas, the building's first, each clear of the labels already placed, of the
+        // building, and of the smaller areas inside its own.
+        let courtyards = footprints.filter { signedTwiceArea($0) < 0 && !covered($0, by: drip) }
+        if let biggest = footprints.max(by: { Self.area($0) < Self.area($1) }) {
+            items += place(document.project.name.uppercased(), inside: biggest, avoiding: courtyards, view: view,
+                           taken: &labels)
+        }
+        let patches = document.terrainPatches.sorted { Self.area($0.boundary) < Self.area($1.boundary) }
+        for (index, patch) in patches.enumerated() {
+            let smaller = patches[..<index].map(\.boundary)
+            items += place(patch.name.uppercased(), inside: patch.boundary, avoiding: footprints + smaller,
+                           view: view, taken: &labels)
         }
         items.append(DisplayItem(.symbol(name: "north-arrow", position: paperPoint(area.maxX - mmTicks(20),
                                                                                     area.maxY - mmTicks(20)),
                                          rotation: .degrees(0), size: .millimeters(16)),
                                  style: DisplayStyle(layer: "A-ANNO-SYMB", pen: .thin)))
         return items
+    }
+
+    /// The roofs' drip line seen from above: the union of the roof meshes' triangles when the engine gives
+    /// them, else of each footprint grown by its edges' own overhangs, at 3" resolution.
+    static func dripLine(_ document: ModelDocument, roofMeshes: [Mesh]) -> [[Point2]] {
+        var shapes: [[Point2]] = []
+        for mesh in roofMeshes {
+            var corner = 0
+            while corner + 2 < mesh.indices.count {
+                let indices = mesh.indices[corner..<(corner + 3)].map(Int.init)
+                corner += 3
+                guard indices.allSatisfy({ $0 < mesh.positions.count }) else { continue }
+                shapes.append(indices.map { Point2(x: mesh.positions[$0].x, y: mesh.positions[$0].y) })
+            }
+        }
+        let meshed = Set(roofMeshes.compactMap(\.elementID))
+        shapes += document.roofs.filter { !meshed.contains($0.id.rawValue) }.map(roofOutline)
+        return RasterOutline.union(shapes, cell: Length.inches(3).ticks)
+    }
+
+    /// Whether all of `hole` lies under the `roofs` (loops, even-odd), tested on a 16 by 16 grid of points
+    /// inside it: a hole only partly roofed is still open to the sky.
+    static func covered(_ hole: [Point2], by roofs: [[Point2]]) -> Bool {
+        let hx = hole.map { Double($0.x.ticks) }, hy = hole.map { Double($0.y.ticks) }
+        guard let x0 = hx.min(), let x1 = hx.max(), let y0 = hy.min(), let y1 = hy.max() else { return false }
+        let loops = roofs.map { roof in (roof.map { Double($0.x.ticks) }, roof.map { Double($0.y.ticks) }) }
+        var tested = 0
+        for row in 0..<16 {
+            for column in 0..<16 {
+                let x = x0 + (x1 - x0) * (Double(column) + 0.5) / 16, y = y0 + (y1 - y0) * (Double(row) + 0.5) / 16
+                guard RasterOutline.inside(x, y, hx, hy) else { continue }
+                tested += 1
+                let under = loops.filter { RasterOutline.inside(x, y, $0.0, $0.1) }.count
+                if under % 2 == 0 { return false }
+            }
+        }
+        return tested > 0
+    }
+
+    /// A roof's footprint with each edge moved out by its own plane's overhang, the corners mitred: the drip
+    /// line, for engines that give no roof mesh. Footprints wound either way grow outward.
+    static func roofOutline(_ roof: Roof) -> [Point2] {
+        let points = roof.footprint.map { (x: Double($0.x.ticks), y: Double($0.y.ticks)) }
+        let count = points.count
+        guard count >= 3 else { return roof.footprint }
+        let turn: Double = signedTwiceArea(roof.footprint) < 0 ? -1 : 1
+        // Each edge's line moved outward: a point on it and its direction.
+        let lines = (0..<count).map { index -> (x: Double, y: Double, dx: Double, dy: Double) in
+            let (a, b) = (points[index], points[(index + 1) % count])
+            let length = max(((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y)).squareRoot(), 1e-9)
+            let (dx, dy) = ((b.x - a.x) / length, (b.y - a.y) / length)
+            let grow = Double(index < roof.planes.count ? roof.planes[index].overhang.ticks : 0)
+            return (a.x + dy * grow * turn, a.y - dx * grow * turn, dx, dy)
+        }
+        return (0..<count).map { index in
+            let (p, q) = (lines[(index + count - 1) % count], lines[index])
+            let cross = p.dx * q.dy - p.dy * q.dx
+            // Edges in line: the moved corner is simply on the moved line.
+            guard abs(cross) > 1e-9 else { return paperPoint(Int64(q.x.rounded()), Int64(q.y.rounded())) }
+            let t = ((q.x - p.x) * q.dy - (q.y - p.y) * q.dx) / cross
+            return paperPoint(Int64((p.x + p.dx * t).rounded()), Int64((p.y + p.dy * t).rounded()))
+        }
+    }
+
+    static func signedTwiceArea(_ points: [Point2]) -> Double {
+        var twice = 0.0
+        for index in points.indices {
+            let a = points[index], b = points[(index + 1) % points.count]
+            twice += Double(a.x.ticks) * Double(b.y.ticks) - Double(b.x.ticks) * Double(a.y.ticks)
+        }
+        return twice
+    }
+
+    /// 45° hatch lines `spacing` apart over the area the loops enclose, even-odd, so holes stay open.
+    static func hatchLines(_ loops: [[Point2]], spacing: Int64) -> [(Point2, Point2)] {
+        // In a frame turned 45°, the lines run along u at fixed v.
+        let root = 0.5.squareRoot()
+        func turned(_ p: Point2) -> (u: Double, v: Double) {
+            let (x, y) = (Double(p.x.ticks), Double(p.y.ticks))
+            return ((x + y) * root, (y - x) * root)
+        }
+        func back(_ u: Double, _ v: Double) -> Point2 {
+            paperPoint(Int64(((u - v) * root).rounded()), Int64(((u + v) * root).rounded()))
+        }
+        let edges = loops.flatMap { loop in
+            loop.indices.map { (turned(loop[$0]), turned(loop[($0 + 1) % loop.count])) }
+        }
+        let vs = edges.flatMap { [$0.0.v, $0.1.v] }
+        guard spacing > 0, let v0 = vs.min(), let v1 = vs.max() else { return [] }
+        var lines: [(Point2, Point2)] = []
+        var v = (v0 / Double(spacing)).rounded(.up) * Double(spacing)
+        while v < v1 {
+            let crossings = edges.compactMap { a, b -> Double? in
+                guard (a.v > v) != (b.v > v) else { return nil }
+                return a.u + (b.u - a.u) * (v - a.v) / (b.v - a.v)
+            }.sorted()
+            for pair in stride(from: 0, to: crossings.count - 1, by: 2) {
+                lines.append((back(crossings[pair], v), back(crossings[pair + 1], v)))
+            }
+            v += Double(spacing)
+        }
+        return lines
+    }
+
+    static func area(_ points: [Point2]) -> Double {
+        var twice = 0.0
+        for index in points.indices {
+            let a = points[index], b = points[(index + 1) % points.count]
+            twice += Double(a.x.ticks) * Double(b.y.ticks) - Double(b.x.ticks) * Double(a.y.ticks)
+        }
+        return abs(twice) / 2
+    }
+
+    /// The length of each side of the lot, written along it just outside, each label's box added to `taken`.
+    static func sideLengths(_ boundary: [Point2], view: ViewTransform, units: LengthFormatStyle,
+                            taken: inout [PaperRect]) -> [DisplayItem] {
+        let style = DisplayStyle(layer: "C-PROP-IDEN", pen: .fine)
+        let height = Double(mmTicks(5) / 2)
+        // Outward is to the right of each side for a counterclockwise lot, to the left for a clockwise one.
+        let outward: Double = signedTwiceArea(boundary.map { view.paper($0) }) >= 0 ? 1 : -1
+        var items: [DisplayItem] = []
+        for index in boundary.indices {
+            let a = boundary[index], b = boundary[(index + 1) % boundary.count]
+            let (dx, dy) = (Double(b.x.ticks - a.x.ticks), Double(b.y.ticks - a.y.ticks))
+            let length = (dx * dx + dy * dy).squareRoot()
+            guard length > 0 else { continue }
+            let (pa, pb) = (view.paper(a), view.paper(b))
+            let (px, py) = (Double(pb.x.ticks - pa.x.ticks), Double(pb.y.ticks - pa.y.ticks))
+            let paperLength = max((px * px + py * py).squareRoot(), 1)
+            var angle = atan2(py, px) * 180 / .pi
+            if angle > 90 || angle <= -90 { angle += 180 }
+            // The text's middle a text height and a half off the line, outside the lot.
+            let (nx, ny) = (py / paperLength * outward, -px / paperLength * outward)
+            let off = height * 1.5
+            let mx = Double(pa.x.ticks + pb.x.ticks) / 2 + nx * off
+            let my = Double(pa.y.ticks + pb.y.ticks) / 2 + ny * off
+            let text = LengthFormatting.format(Length(ticks: Int64(length.rounded())), style: units)
+            // Its baseline sits below its middle by half its height, across the text's own direction.
+            let radians = angle * .pi / 180
+            let (ux, uy) = (cos(radians), sin(radians))
+            let base = (x: mx + uy * height / 2, y: my - ux * height / 2)
+            let width = height * 0.85 * Double(text.count)
+            let reach = (x: abs(ux) * width / 2 + abs(uy) * height / 2, y: abs(uy) * width / 2 + abs(ux) * height / 2)
+            // At the side's middle, else further along it either way, else further out; a label with nowhere
+            // clear of the others is left out rather than printed over one.
+            let (sx, sy) = (px / paperLength, py / paperLength)
+            let room = max(paperLength / 2 - reach.x - reach.y, 0)
+            let moves: [(along: Double, out: Double)] = [(0, 0), (-room / 2, 0), (room / 2, 0), (-room, 0),
+                                                         (room, 0), (0, height * 1.5), (-room / 2, height * 1.5),
+                                                         (room / 2, height * 1.5)]
+            for move in moves {
+                let cx = mx + sx * move.along + nx * move.out, cy = my + sy * move.along + ny * move.out
+                let rect = PaperRect(minX: Int64(cx - reach.x), minY: Int64(cy - reach.y), width: Int64(reach.x * 2),
+                                     height: Int64(reach.y * 2))
+                guard !taken.contains(where: { $0.intersects(rect) }) else { continue }
+                taken.append(rect)
+                let shift = (x: sx * move.along + nx * move.out, y: sy * move.along + ny * move.out)
+                let at = paperPoint(Int64((base.x + shift.x).rounded()), Int64((base.y + shift.y).rounded()))
+                items.append(DisplayItem(.text(position: at, string: text, height: Length(ticks: mmTicks(5) / 2),
+                                               rotation: Angle(microDegrees: Int64((angle * 1_000_000).rounded())),
+                                               alignment: .center), style: style))
+                break
+            }
+        }
+        return items
+    }
+
+    /// A name at the point nearest the middle of an area whose label box lies inside it, clear of the labels
+    /// already placed and of every `avoiding` area; or nothing when no such point is found.
+    static func place(_ name: String, inside boundary: [Point2], avoiding: [[Point2]], view: ViewTransform,
+                      taken: inout [PaperRect]) -> [DisplayItem] {
+        let paper = boundary.map { view.paper($0) }
+        let xs = paper.map { Double($0.x.ticks) }, ys = paper.map { Double($0.y.ticks) }
+        guard let x0 = xs.min(), let x1 = xs.max(), let y0 = ys.min(), let y1 = ys.max() else { return [] }
+        let obstacles = avoiding.map { area in
+            (area.map { Double(view.paper($0).x.ticks) }, area.map { Double(view.paper($0).y.ticks) })
+        }
+        // Capitals run about 0.8 of their height wide; a little more keeps neighbours apart.
+        let height = Double(mmTicks(5) / 2), width = height * 0.85 * Double(name.count) + height
+        var best: (score: Double, x: Double, y: Double)?
+        for row in 1..<16 {
+            for column in 1..<16 {
+                let x = x0 + (x1 - x0) * Double(column) / 16, y = y0 + (y1 - y0) * Double(row) / 16
+                let box = PaperRect(minX: Int64(x - width / 2), minY: Int64(y - height / 2), width: Int64(width),
+                                    height: Int64(height * 1.6))
+                let corners = [(box.minX, box.minY), (box.maxX, box.minY), (box.maxX, box.maxY), (box.minX, box.maxY)]
+                let points = corners.map { (Double($0.0), Double($0.1)) } + [(x, y)]
+                guard points.allSatisfy({ RasterOutline.inside($0.0, $0.1, xs, ys) }),
+                      !points.contains(where: { point in
+                          obstacles.contains { RasterOutline.inside(point.0, point.1, $0.0, $0.1) }
+                      }),
+                      !taken.contains(where: { $0.intersects(box) }) else { continue }
+                // Prefer the middle.
+                let score = -abs(x - (x0 + x1) / 2) - abs(y - (y0 + y1) / 2)
+                if score > (best?.score ?? -.infinity) { best = (score, x, y) }
+            }
+        }
+        guard let best else { return [] }
+        taken.append(PaperRect(minX: Int64(best.x - width / 2), minY: Int64(best.y - height / 2),
+                               width: Int64(width), height: Int64(height * 1.6)))
+        return [RoofPlanView.label(name, at: paperPoint(Int64(best.x), Int64(best.y)))]
+    }
+}
+
+extension PaperRect {
+    func intersects(_ other: PaperRect) -> Bool {
+        minX < other.maxX && other.minX < maxX && minY < other.maxY && other.minY < maxY
+    }
+}
+
+/// Which site areas are the lot: named "Lot" or "Lot" and a number, as the app names them.
+enum SiteKindName {
+    static func isLot(_ name: String) -> Bool {
+        let words = name.split(separator: " ")
+        guard words.first?.lowercased() == "lot" else { return false }
+        return words.count == 1 || (words.count == 2 && Int(words[1]) != nil)
     }
 }
 
@@ -226,6 +509,72 @@ enum CoverSheet {
             y -= mmTicks(8)
             items.append(DisplayItem(.text(position: paperPoint(left, y), string: "\(number + 1). \(note)",
                                            height: .millimeters(3), rotation: .degrees(0), alignment: .left), style: body))
+        }
+        return items + legend(at: paperPoint(area.minX + area.width / 2, area.maxY - mmTicks(45)))
+    }
+
+    /// What the abbreviations on the drawings stand for, in the order a reader looks them up.
+    static let abbreviations: [(String, String)] = [
+        ("AFF", "Above finished floor"), ("CLG", "Ceiling"), ("DN", "Down"), ("EQ", "Equal"),
+        ("FF", "Finished floor"), ("MECH", "Mechanical"), ("NTS", "Not to scale"), ("SF", "Square feet"),
+        ("TYP", "Typical"), ("UP", "Up"), ("WC", "Water closet"), ("WIC", "Walk-in closet"),
+    ]
+
+    /// The symbols the plans and elevations use, each drawn small beside what it means, then the
+    /// abbreviations; its top left at `origin`.
+    static func legend(at origin: Point2) -> [DisplayItem] {
+        let title = DisplayStyle(layer: "A-ANNO-TEXT", pen: .wide)
+        let body = DisplayStyle(layer: "A-ANNO-TEXT", pen: .fine)
+        let wall = DisplayStyle(layer: "A-ANNO-SYMB", pen: .wide)
+        let thin = DisplayStyle(layer: "A-ANNO-SYMB", pen: .thin)
+        let (x, top) = (origin.x.ticks, origin.y.ticks)
+        func text(_ string: String, _ dx: Int64, _ dy: Int64, height: Double = 3, style: DisplayStyle) -> DisplayItem {
+            DisplayItem(.text(position: paperPoint(x + dx, top - dy), string: string,
+                              height: .millimeters(Int64(height)), rotation: .degrees(0), alignment: .left),
+                        style: style)
+        }
+        func line(_ x0: Int64, _ y0: Int64, _ x1: Int64, _ y1: Int64, _ style: DisplayStyle) -> DisplayItem {
+            DisplayItem(.line(start: paperPoint(x + x0, top - y0), end: paperPoint(x + x1, top - y1)), style: style)
+        }
+        let column = mmTicks(30)
+        var items = [text("SYMBOLS", 0, 0, height: 4, style: title)]
+        // An exterior wall: two lines with the wall hatch between.
+        var row = mmTicks(12)
+        items.append(DisplayItem(.hatch(boundary: [paperPoint(x, top - row), paperPoint(x + mmTicks(20), top - row),
+                                                   paperPoint(x + mmTicks(20), top - row - mmTicks(3)),
+                                                   paperPoint(x, top - row - mmTicks(3))],
+                                        pattern: .diagonal, spacing: .millimeters(1), angle: .degrees(45)),
+                                 style: thin))
+        items += [line(0, row, mmTicks(20), row, wall), line(0, row + mmTicks(3), mmTicks(20), row + mmTicks(3), wall),
+                  text("Wall, cut in plan", column, row + mmTicks(2), style: body)]
+        // A door: its leaf drawn open and the arc it swings through, with its mark.
+        row += mmTicks(14)
+        items += [line(0, row, mmTicks(4), row, wall), line(mmTicks(14), row, mmTicks(20), row, wall),
+                  line(mmTicks(4), row, mmTicks(4), row - mmTicks(10), thin)]
+        items.append(DisplayItem(.arc(center: paperPoint(x + mmTicks(4), top - row), radius: .millimeters(10),
+                                      start: .degrees(0), sweep: .degrees(90)), style: thin))
+        items.append(text("Door and its swing; D1 is its mark in the door schedule", column, row, style: body))
+        // A window: glass lines in the wall, with its mark.
+        row += mmTicks(12)
+        items += [line(0, row, mmTicks(20), row, wall), line(0, row + mmTicks(3), mmTicks(20), row + mmTicks(3), wall),
+                  line(mmTicks(4), row + mmTicks(3) / 2, mmTicks(16), row + mmTicks(3) / 2, thin),
+                  text("Window; W1 is its mark in the window schedule", column, row + mmTicks(2), style: body)]
+        // A stair, rising in the direction of its arrow.
+        row += mmTicks(12)
+        items += [line(0, row, mmTicks(16), row, thin), line(mmTicks(16), row, mmTicks(13), row - mmTicks(2), thin),
+                  line(mmTicks(16), row, mmTicks(13), row + mmTicks(2), thin), text("UP", mmTicks(17), row + mmTicks(1),
+                                                                                   style: body),
+                  text("Stair, rising the way the arrow points", column, row + mmTicks(1), style: body)]
+        // North, as on the site plan.
+        row += mmTicks(14)
+        items.append(DisplayItem(.symbol(name: "north-arrow", position: paperPoint(x + mmTicks(8), top - row),
+                                         rotation: .degrees(0), size: .millimeters(10)), style: thin))
+        items.append(text("North", column, row, style: body))
+        row += mmTicks(20)
+        items.append(text("ABBREVIATIONS", 0, row, height: 4, style: title))
+        for (short, long) in abbreviations {
+            row += mmTicks(7)
+            items += [text(short, 0, row, style: body), text(long, mmTicks(20), row, style: body)]
         }
         return items
     }
