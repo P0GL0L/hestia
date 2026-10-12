@@ -14,7 +14,7 @@ enum HouseViewMode: Equatable {
 /// Orbit turns the house like a turntable around its middle (drag), pans (two-finger or right drag), and zooms
 /// (scroll or pinch); the roof can be hidden to look down into the rooms. Walk puts the camera at eye height in
 /// the largest room: W A S D or the arrow keys move, a drag looks around, Shift runs, and Escape leaves. Walls
-/// stop the walker; doors and cased openings let it through.
+/// stop the walker; doors and cased openings let it through, and stairs take it up and down (`WalkHouse`).
 ///
 /// With the asset library (`LiveLook`), surfaces wear photographed materials, furniture and planting are finished
 /// models, and the sky photo lights the house; without it, the house draws in flat colors with simple shapes.
@@ -31,7 +31,7 @@ struct HouseView: NSViewRepresentable {
     /// Zoom steps from the + and − buttons: each step closer or farther takes a fifth off or puts it back.
     var zoom: Int
     var walkStart: Walker
-    var barriers: WalkBarriers
+    var house: WalkHouse
     var onLeaveWalk: @MainActor () -> Void
 
     final class Coordinator {
@@ -83,7 +83,7 @@ struct HouseView: NSViewRepresentable {
     func updateNSView(_ view: HouseSCNView, context: Context) {
         let coordinator = context.coordinator
         view.onLeaveWalk = onLeaveWalk
-        view.barriers = barriers
+        view.house = house
         let newSession = coordinator.sessionID != sessionID
         let changed = coordinator.scene != scene || coordinator.document != document || coordinator.meshes != meshes
         if newSession || changed || coordinator.shown == nil {
@@ -230,7 +230,7 @@ struct HouseView: NSViewRepresentable {
 
 /// The 3D view, with walking: keys move the walker, a drag turns its head, and Escape hands back to orbit.
 final class HouseSCNView: SCNView {
-    var barriers = WalkBarriers(segments: [])
+    var house = WalkHouse(levels: [:], flights: [])
     /// The finished look, when the app has its asset library; the walking camera is tuned for it.
     var look: LiveLook?
     var onLeaveWalk: @MainActor () -> Void = {}
@@ -342,7 +342,7 @@ final class HouseSCNView: SCNView {
         let now = ProcessInfo.processInfo.systemUptime
         let seconds = min(max(now - lastTick, 0), 0.1)
         lastTick = now
-        current.step(input(), seconds: seconds, barriers: barriers)
+        current.step(input(), seconds: seconds, house: house)
         walker = current
         place()
         // Every half second, one gentle round of metering, so walking from a bright room into a dim one eases

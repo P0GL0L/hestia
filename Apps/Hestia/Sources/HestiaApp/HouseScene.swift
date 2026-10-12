@@ -93,7 +93,7 @@ struct HouseScene: Equatable, Sendable {
         var house: [Look: Solid] = [:]
         var models: [PlacedModel] = []
         var outdoor: [Look: Solid] = [:]
-        Self.addEngineMeshes(meshes, to: &house)
+        Self.addEngineMeshes(meshes, document: document, to: &house)
         OpeningDetail.add(document, to: &house)
         Baseboards.add(document, to: &house)
         Self.addRooms(document, to: &house)
@@ -138,10 +138,13 @@ struct HouseScene: Equatable, Sendable {
     }
 
     /// The engine's meshes, merged into one solid per look and turned from z up to y up.
-    private static func addEngineMeshes(_ meshes: [Mesh], to solids: inout [Look: Solid]) {
-        // Doors and glass come from `OpeningDetail` instead: the engine's are flat panes with no thickness.
+    private static func addEngineMeshes(_ meshes: [Mesh], document: ModelDocument, to solids: inout [Look: Solid]) {
+        // Doors and glass come from `OpeningDetail` instead: the engine's are flat panes with no thickness. A slab
+        // a stair climbs through is built here with its stairwell cut (`Stairwells`).
         let replaced: Set<String> = ["door", "glass"]
+        let cut = addCutSlabs(document, to: &solids)
         for mesh in meshes where !mesh.indices.isEmpty && !replaced.contains(mesh.materialID.rawValue) {
+            if let id = mesh.elementID, cut.contains(id) { continue }
             let (look, group) = look(for: mesh.materialID)
             var solid = solids[look] ?? Solid(look: look, group: group)
             let base = UInt32(solid.positions.count)
@@ -158,30 +161,59 @@ struct HouseScene: Equatable, Sendable {
         }
     }
 
+    /// The slabs a stair climbs through, built with their stairwells open; returns their IDs, so the engine's
+    /// whole slabs are left out.
+    private static func addCutSlabs(_ document: ModelDocument, to solids: inout [Look: Solid]) -> Set<UUID> {
+        let flights = WalkHouse.flights(document)
+        var cut: Set<UUID> = []
+        for slab in document.slabs {
+            let wells = flights.filter { $0.upper == slab.storeyID }
+            guard !wells.isEmpty, let storey = document.storeys.first(where: { $0.id == slab.storeyID }) else {
+                continue
+            }
+            let top = feet(storey.elevation) + feet(slab.topOffset)
+            var solid = solids[.slab] ?? Solid(look: .slab, group: .house)
+            Stairwells.slab(slab.outline.map { (x: feet($0.x), y: feet($0.y)) }, bottom: top - feet(slab.thickness),
+                            top: top, wells: wells, into: &solid)
+            solids[.slab] = solid
+            cut.insert(slab.id.rawValue)
+        }
+        return cut
+    }
+
     /// A floor and a ceiling in each room, from its centerline outline. A storey with walls but no rooms and no
     /// slabs gets one floor under its walls, so the house never stands on bare ground.
     private static func addRooms(_ document: ModelDocument, to solids: inout [Look: Solid]) {
         let walls = Dictionary(document.walls.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var ceiling = solids[.ceiling] ?? Solid(look: .ceiling, group: .ceiling)
+        let flights = WalkHouse.flights(document)
         for storey in document.storeys {
             let base = feet(storey.elevation)
             let rooms = document.rooms.filter { $0.storeyID == storey.id }
+            // Stairs open the ceilings of the storey they leave and the floors of the one they reach.
+            let up = flights.filter { $0.lower == storey.id }, down = flights.filter { $0.upper == storey.id }
             for room in rooms {
                 guard let outline = RoomOutline.centerline(of: room, in: document) else { continue }
                 let plan = outline.map { (x: feet($0.x), y: feet($0.y)) }
                 let look = floorLook(room)
                 var floor = solids[look] ?? Solid(look: look)
-                Shapes.flat(&floor, plan, height: base + 0.02)
+                for piece in Stairwells.outside(plan, wells: down) {
+                    Shapes.flat(&floor, piece, height: base + 0.02)
+                }
                 solids[look] = floor
                 let heights = room.boundaryWallIDs.compactMap { walls[$0].map { feet($0.height) } }
-                Shapes.flat(&ceiling, plan, height: base + (heights.min() ?? 8) - 0.02, facingUp: false)
+                for piece in Stairwells.outside(plan, wells: up) {
+                    Shapes.flat(&ceiling, piece, height: base + (heights.min() ?? 8) - 0.02, facingUp: false)
+                }
             }
             let storeyWalls = document.walls.filter { $0.storeyID == storey.id }
             let hasSlab = document.slabs.contains { $0.storeyID == storey.id }
             if rooms.isEmpty, !hasSlab, let box = wallBox(storeyWalls) {
                 var floor = solids[.woodFloor] ?? Solid(look: .woodFloor)
-                Shapes.flat(&floor, [(box.x0, box.y0), (box.x1, box.y0), (box.x1, box.y1), (box.x0, box.y1)],
-                            height: base + 0.02)
+                let plan = [(box.x0, box.y0), (box.x1, box.y0), (box.x1, box.y1), (box.x0, box.y1)]
+                for piece in Stairwells.outside(plan, wells: down) {
+                    Shapes.flat(&floor, piece, height: base + 0.02)
+                }
                 solids[.woodFloor] = floor
             }
         }
