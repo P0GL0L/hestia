@@ -15,12 +15,14 @@ struct HestiaModel {
     let meshes: [Mesh]
     /// What the 3D view shows: the meshes upright, with floors, ceilings, furniture, and the site.
     let house: HouseScene
-    /// The storey the plan shows: the lowest.
-    let groundStorey: StoreyID?
-    /// The ground floor plan's walls, openings, stairs, and room tags, in sheet paper space.
+    /// The storey the plan shows and edits: the one chosen, else the lowest.
+    let planStorey: StoreyID?
+    /// The storey under it in its building, drawn faint under the plan so the floor above lines up with it.
+    let storeyBelow: StoreyID?
+    /// That storey's floor plan's walls, openings, stairs, and room tags, in sheet paper space.
     let plan: [DisplayItem]
-    /// How that plan was placed on its sheet, to take paper points back into the model. A ground storey with no
-    /// walls has no drawn plan to place, so it gets the blank placement instead, and the first wall can be drawn.
+    /// How that plan was placed on its sheet, to take paper points back into the model. A storey with no walls
+    /// has no drawn plan to place, so it gets the blank placement instead, and the first wall can be drawn.
     let planTransform: ViewTransform?
     /// The paper the plan view shows: the drawn plan's extent, or the blank area when the storey has no walls.
     let planBounds: (min: Point2, max: Point2)?
@@ -30,7 +32,8 @@ struct HestiaModel {
         "A-WALL", "A-WALL-PATT", "A-DOOR", "A-GLAZ", "A-FLOR-STRS", "A-FLOR-OPNG", "A-AREA-IDEN",
     ]
 
-    init(document: ModelDocument, issueDate: String? = HestiaModel.today()) throws {
+    /// The model drawn from `document`, its plan showing `storey` when the document has it, else the lowest.
+    init(document: ModelDocument, issueDate: String? = HestiaModel.today(), storey: StoreyID? = nil) throws {
         let engine = HestiaGeometryEngine()
         let drawingSet = SchematicDrawingSet(issueDate: issueDate)
         self.document = document
@@ -38,16 +41,25 @@ struct HestiaModel {
         sheets = try drawingSet.sheets(for: document, geometry: engine)
         meshes = try engine.meshes(of: document)
         house = HouseScene(document: document, meshes: meshes)
-        let ground = document.storeys.min { $0.elevation.ticks < $1.elevation.ticks }
-        groundStorey = ground?.id
-        let placed = ground.flatMap { drawingSet.planTransform(for: document, storey: $0.id) }
-        let empty = ground.map { storey in !document.walls.contains { $0.storeyID == storey.id } } ?? false
+        let shown = document.storeys.first { $0.id == storey }
+            ?? document.storeys.min { $0.elevation.ticks < $1.elevation.ticks }
+        planStorey = shown?.id
+        storeyBelow = shown.flatMap { Self.storey(below: $0, in: document) }?.id
+        // A storey none of the document's own sheets plans (one added after they were set) gets a stand-in.
+        let standIn = shown.flatMap { Self.standInPlanSheet(for: $0, in: document) }
+        var source = document
+        if let standIn { source.sheets = [standIn] }
+        let placed = shown.flatMap { drawingSet.planTransform(for: source, storey: $0.id) }
+        let empty = shown.map { storey in !document.walls.contains { $0.storeyID == storey.id } } ?? false
         planTransform = placed ?? (empty ? Self.blankTransform : nil)
-        // The ground plan's sheet: the model's own sheet for it, or the drawing set's default first plan sheet.
-        let number = ground.flatMap { storey in
-            document.sheets.first { $0.views.contains(.floorPlan(storeyID: storey.id)) }?.number
+        // The storey's plan sheet: the model's own sheet for it, or the drawing set's default plan sheet, which
+        // numbers the storeys from A-101 in the document's order.
+        let number = shown.flatMap { storey in
+            source.sheets.first { $0.views.contains(.floorPlan(storeyID: storey.id)) }?.number
+                ?? document.storeys.firstIndex(of: storey).map { String(format: "A-%d", 101 + $0) }
         } ?? "A-101"
-        let planSheet = sheets.first { $0.number == number }
+        let planSheet = try (standIn == nil ? sheets : drawingSet.sheets(for: source, geometry: engine))
+            .first { $0.number == number }
         plan = planSheet?.content.items.filter { Self.planLayers.contains($0.style.layer) } ?? []
         if let drawn = DisplayList(items: plan).bounds {
             planBounds = drawn
@@ -73,7 +85,7 @@ struct HestiaModel {
         return try HestiaModel(document: document)
     }
 
-    /// Where an empty ground storey is drawn on: model zero at paper zero, at 1/4" = 1'-0".
+    /// Where an empty storey is drawn on: model zero at paper zero, at 1/4" = 1'-0".
     static let blankTransform = ViewTransform(scale: .quarterInch, modelOrigin: Point2(x: .feet(0), y: .feet(0)),
                                               paperOrigin: Point2(x: .feet(0), y: .feet(0)))
 
@@ -156,29 +168,31 @@ struct HestiaModel {
     /// How close, on the plan sheet's paper, a new wall end must land to an existing wall end to join it.
     static let endSnapReach: Length = .millimeters(3)
 
-    /// Where a clicked wall end lands: on the grid, then on an existing ground-storey wall end when the grid
-    /// point is within `endSnapReach` of it on paper, so walls drawn by hand meet exactly. The direction is
-    /// never squared to an axis.
+    /// Where a clicked wall end lands: on the grid, then on an existing wall end of the plan's storey or the
+    /// storey below when the grid point is within `endSnapReach` of it on paper, so walls drawn by hand meet
+    /// exactly and an upper floor's walls stand on the ones under them. The direction is never squared to an axis.
     func snappedWallEnd(_ point: Point2) -> Point2 {
         let grid = snapped(point)
-        guard let storey = groundStorey, let scale = planTransform?.scale else { return grid }
+        guard let storey = planStorey, let scale = planTransform?.scale else { return grid }
         let reach = Double(Self.endSnapReach.ticks * scale.modelUnitsPerPaperUnit)
         func distance(_ end: Point2) -> Double {
             hypot(Double(end.x.ticks - grid.x.ticks), Double(end.y.ticks - grid.y.ticks))
         }
-        let ends = document.walls.filter { $0.storeyID == storey }.flatMap { [$0.start, $0.end] }
+        let ends = document.walls.filter { $0.storeyID == storey || $0.storeyID == storeyBelow }
+            .flatMap { [$0.start, $0.end] }
         guard let nearest = ends.min(by: { distance($0) < distance($1) }), distance(nearest) <= reach else {
             return grid
         }
         return nearest
     }
 
-    /// A straight wall on the ground storey from one model point to another, with a new ID, as thick and as
+    /// A straight wall on the plan's storey from one model point to another, with a new ID, as thick and as
     /// tall as an exterior wall on that storey (one with layers, else the thickest). On a storey with no walls
-    /// it takes the default exterior size.
+    /// it takes the size of the storey below's, else the default exterior size.
     func wallCommand(from start: Point2, to end: Point2, id: WallID = WallID(UUID())) throws -> AddWallCommand {
-        guard let storey = groundStorey else { throw LoadError(message: "The model has no storey to draw on.") }
-        let walls = document.walls.filter { $0.storeyID == storey }
+        guard let storey = planStorey else { throw LoadError(message: "The model has no storey to draw on.") }
+        var walls = document.walls.filter { $0.storeyID == storey }
+        if walls.isEmpty { walls = document.walls.filter { $0.storeyID == storeyBelow } }
         let exterior = walls.first { !$0.layers.isEmpty } ?? walls.max { $0.thickness.ticks < $1.thickness.ticks }
         return AddWallCommand(wallID: id, storeyID: storey, start: start, end: end,
                               thickness: exterior?.thickness ?? Self.defaultWallThickness,
@@ -208,9 +222,9 @@ struct HestiaModel {
         }
     }
 
-    /// A room on the ground storey with a new ID, the given name and boundary walls, and no finishes.
+    /// A room on the plan's storey with a new ID, the given name and boundary walls, and no finishes.
     func roomCommand(named name: String, walls: [WallID], id: RoomID = RoomID(UUID())) throws -> AddRoomCommand {
-        guard let storey = groundStorey else { throw LoadError(message: "The model has no storey to put a room on.") }
+        guard let storey = planStorey else { throw LoadError(message: "The model has no storey to put a room on.") }
         return AddRoomCommand(roomID: id, storeyID: storey, name: name, boundaryWallIDs: walls)
     }
 
@@ -223,16 +237,16 @@ struct HestiaModel {
         return error.localizedDescription
     }
 
-    /// A hip roof over the ground storey's wall line, as on the cottage: 6" in 12 on every edge, a 1'-0"
+    /// A hip roof over the plan storey's wall line, as on the cottage: 6" in 12 on every edge, a 1'-0"
     /// overhang, and its eave at the walls' height. Only when the ground walls close one rectangle, square to
     /// the axes: the walls lying on the four sides of the box around all the ground walls must cover those sides
     /// end to end (walls inside it are fine, so an L, whose box has open sides, is refused). The footprint is the
     /// rectangle's corners at the wall centerlines, counterclockwise. Refused when the storey has a roof already,
     /// or when the walls on the sides are not all one height.
     func roofCommand(id: RoofID = RoofID(UUID())) throws -> AddRoofCommand {
-        guard let storey = groundStorey else { throw LoadError(message: "The model has no storey to roof.") }
+        guard let storey = planStorey else { throw LoadError(message: "The model has no storey to roof.") }
         if document.roofs.contains(where: { $0.storeyID == storey }) {
-            throw LoadError(message: "The ground storey already has a roof, so no other is added.")
+            throw LoadError(message: "This storey already has a roof, so no other is added.")
         }
         let walls = document.walls.filter { $0.storeyID == storey }
         let refusal = LoadError(message: "The ground walls do not close one rectangle, so there is no roof to add.")
@@ -271,13 +285,13 @@ struct HestiaModel {
                               pitchRisePer12: Self.defaultRoofPitch, overhang: Self.defaultRoofOverhang)
     }
 
-    /// A straight stair on the ground storey with a new ID, its bottom riser at `start` on its centerline, climbing
+    /// A straight stair on the plan's storey with a new ID, its bottom riser at `start` on its centerline, climbing
     /// toward `toward`. Its width, risers, and run length come from a stair already on that storey; with none to
     /// copy, it is 3'-0" wide with 10" treads and the fewest equal risers (at least 2) of at most 8" that reach
     /// the storey's wall height (8'-0" with no walls), each rounded to the tick. Walls of more than one height
     /// are refused. The run is one tread fewer than the risers, so the second point sets only the direction.
     func stairCommand(from start: Point2, toward: Point2, id: StairID = StairID(UUID())) throws -> AddStairCommand {
-        guard let storey = groundStorey else { throw LoadError(message: "The model has no storey to put a stair on.") }
+        guard let storey = planStorey else { throw LoadError(message: "The model has no storey to put a stair on.") }
         var dx = Double(toward.x.ticks - start.x.ticks), dy = Double(toward.y.ticks - start.y.ticks)
         let distance: Double = (dx * dx + dy * dy).squareRoot()
         guard distance > 0 else {
@@ -411,7 +425,7 @@ struct HestiaModel {
     /// The opening of any kind a point of the plan sheet's paper lands on: inside the gap between its jambs, or
     /// within 2 mm on paper of its drawn symbol (jambs, leaf, swing, and glazing). Nil when it lands on none.
     func openingHit(paper: Point2) -> OpeningID? {
-        guard let transform = planTransform, let storey = groundStorey else { return nil }
+        guard let transform = planTransform, let storey = planStorey else { return nil }
         let walls = Dictionary(uniqueKeysWithValues: document.walls.filter { $0.storeyID == storey }.map { ($0.id, $0) })
         let reach = Double(Length.millimeters(2).ticks)
         for opening in document.openings {
@@ -428,7 +442,7 @@ struct HestiaModel {
     /// The stair whose plan symbol a point of the plan sheet's paper lands on: inside the rectangle of its run
     /// and width, or within 2 mm on paper of a line of its symbol. Nil when it lands on no stair.
     func stairHit(paper: Point2) -> StairID? {
-        guard let transform = planTransform, let storey = groundStorey else { return nil }
+        guard let transform = planTransform, let storey = planStorey else { return nil }
         let reach = Double(Length.millimeters(2).ticks)
         for stair in document.stairs where stair.storeyID == storey {
             if Self.contains(Self.stairRectangle(stair).map(transform.paper), paper) { return stair.id }
@@ -453,11 +467,11 @@ struct HestiaModel {
                 point(sx + dx - nx, sy + dy - ny), point(sx + dx + nx, sy + dy + ny)]
     }
 
-    /// The ground-storey room a point of the plan sheet's paper falls inside: within the room's centerline
+    /// The plan storey's room a point of the plan sheet's paper falls inside: within the room's centerline
     /// polygon (the corners its tag is placed from). A room whose walls give no polygon has no inside and is never
     /// hit. Where rooms overlap, the smallest is the one meant. The caller checks walls and openings first.
     func roomHit(paper: Point2) -> RoomID? {
-        guard let transform = planTransform, let storey = groundStorey else { return nil }
+        guard let transform = planTransform, let storey = planStorey else { return nil }
         let point = transform.model(paper)
         var best: (id: RoomID, area: Double)?
         for room in document.rooms where room.storeyID == storey {
@@ -474,9 +488,9 @@ struct HestiaModel {
         return best?.id
     }
 
-    /// The ground storey's roof, when it has one.
-    var groundRoof: RoofID? {
-        guard let storey = groundStorey else { return nil }
+    /// The plan storey's roof, when it has one.
+    var planRoof: RoofID? {
+        guard let storey = planStorey else { return nil }
         return document.roofs.first { $0.storeyID == storey }?.id
     }
 
@@ -628,22 +642,22 @@ struct HestiaModel {
         return try SheetPDFExporter().export(.sheets(set.sheets(for: document, geometry: HestiaGeometryEngine())))
     }
 
-    /// The ground floor plan as ASCII DXF, with the schematic stamp, in the project's units: the plan's walls,
+    /// The shown storey's floor plan as ASCII DXF, with the schematic stamp, in the project's units: the plan's walls,
     /// doors and swings, windows, stairs, and room tags, taken back from the sheet into the model so a length in
     /// the file is the length in the model. Hatches have no DXF entity here and are left out by the writer.
     func dxf() throws -> Data {
-        guard groundStorey != nil, planTransform != nil else {
-            throw LoadError(message: "The model has no placed ground floor plan to export.")
+        guard planStorey != nil, planTransform != nil else {
+            throw LoadError(message: "The model has no placed floor plan to export.")
         }
         guard !plan.isEmpty else {
-            throw LoadError(message: "The ground floor has nothing drawn to export. Add a wall first.")
+            throw LoadError(message: "This floor has nothing drawn to export. Add a wall first.")
         }
         let units: DXFDrawingUnits = document.project.displayUnits == .metric ? .millimeters : .inches
         let text = try DisplayListDXF.export(DisplayList(items: modelPlan()), units: units)
         return Data(text.utf8)
     }
 
-    /// The ground floor plan in model space: each plan item taken back through the plan's placement on its
+    /// The shown storey's floor plan in model space: each plan item taken back through the plan's placement on its
     /// sheet. Paper points come back exactly onto the scale's model grid, a fraction of a millimetre at most
     /// from where the model put them. Text heights are scaled with the drawing too, so a room tag in the file
     /// reads at its printed size when the file is plotted at the plan's scale. Without a placement there is no
@@ -658,13 +672,15 @@ struct HestiaModel {
 
     /// The model area the plan view shows: the area it already shows (`held`), grown only as far as the drawing
     /// now needs, so the view stays still while drawing inside it. With nothing held it is the drawing (with the
-    /// site and furniture) and a margin, or the blank 60' by 40' area when nothing is drawn yet.
+    /// site, furniture, and the storey below) and a margin, or the blank 60' by 40' area when nothing is drawn yet.
     func viewArea(holding held: (min: Point2, max: Point2)?) -> (min: Point2, max: Point2) {
         let blank = (min: Point2(x: .feet(0), y: .feet(0)), max: Point2(x: .feet(60), y: .feet(40)))
         let margin = Self.viewMargin.ticks
         // The drawn plan, the site's patches, and placed items, with a margin.
         var corners = DisplayList(items: modelPlan()).bounds.map { [$0.min, $0.max] } ?? []
         corners += document.terrainPatches.flatMap(\.boundary) + document.placements.map(\.position)
+        // An upper storey with nothing drawn yet still shows the floor under it.
+        corners += document.walls.filter { $0.storeyID == storeyBelow }.flatMap { [$0.start, $0.end] }
         let xs = corners.map(\.x.ticks), ys = corners.map(\.y.ticks)
         let drawn = xs.min().flatMap { x0 in ys.min().map { y0 in
             (min: Point2(x: Length(ticks: x0 - margin), y: Length(ticks: y0 - margin)),
@@ -744,9 +760,9 @@ struct HeldFit {
 struct EditSession {
     private(set) var model: HestiaModel
     /// Each step's inverse commands, in the order that undoes it; the last step last.
-    private(set) var undoStack: [[AnyCommand]] = []
+    private(set) var undoStack: [HistoryStep] = []
     /// The steps that redo what was undone, the most recently undone last. A new edit clears it.
-    private(set) var redoStack: [[AnyCommand]] = []
+    private(set) var redoStack: [HistoryStep] = []
     /// Which session this is. Edits and undo keep it; New and Open start a session with a new one, so a view
     /// can tell a changed model from an edited one.
     let id = UUID()
@@ -861,7 +877,7 @@ struct EditSession {
         }
     }
 
-    /// Adds a room on the ground storey named `name` and bounded by `walls` in the order given, with a new ID
+    /// Adds a room on the plan's storey named `name` and bounded by `walls` in the order given, with a new ID
     /// and no finishes. The command's own checks decide what is refused.
     mutating func addRoom(named name: String, walls: [WallID]) throws {
         try perform(model.roomCommand(named: name, walls: walls).erased)
@@ -921,12 +937,18 @@ struct EditSession {
         return nil
     }
 
-    /// Removes the ground storey's roof.
+    /// Removes the plan storey's roof.
     mutating func removeRoof() throws {
-        guard let id = model.groundRoof else {
-            throw HestiaModel.LoadError(message: "The ground storey has no roof to remove.")
+        guard let id = model.planRoof else {
+            throw HestiaModel.LoadError(message: "This storey has no roof to remove.")
         }
         try perform(RemoveRoofCommand(roofID: id).erased)
+    }
+
+    /// Shows another storey's plan, to see and edit it. Not an edit: Undo and Save are untouched.
+    mutating func show(storey: StoreyID) throws {
+        guard storey != model.planStorey else { return }
+        model = try HestiaModel(document: model.document, issueDate: model.issueDate, storey: storey)
     }
 
     /// Applies a command, keeping its inverse. A new edit clears what could be redone.
@@ -934,33 +956,41 @@ struct EditSession {
         try perform(batch: [command])
     }
 
-    /// Applies commands in order as one step that one Undo takes back. If any is refused, nothing changes.
-    mutating func perform(batch commands: [AnyCommand]) throws {
+    /// Applies commands in order as one step that one Undo takes back. If `storey` is given, that storey is shown
+    /// after the edit and the prior selection is restored by Undo. If any command is refused, nothing changes.
+    mutating func perform(batch commands: [AnyCommand], showing storey: StoreyID? = nil) throws {
         guard !commands.isEmpty else { return }
+        let previousStorey = model.planStorey
         var document = model.document
         let inverses = try document.perform(batch: commands)
-        model = try HestiaModel(document: document, issueDate: model.issueDate)
-        undoStack.append(inverses)
+        model = try HestiaModel(document: document, issueDate: model.issueDate, storey: storey ?? previousStorey)
+        undoStack.append(HistoryStep(commands: inverses, storeyToShow: storey == nil ? nil : previousStorey))
         redoStack.removeAll()
     }
 
     /// Applies the inverse of the last change, keeping the commands that put it back for redo.
     mutating func undo() throws {
-        guard let inverses = undoStack.last else { return }
+        guard let step = undoStack.last else { return }
+        let previousStorey = model.planStorey
         var document = model.document
-        let redo = try document.perform(batch: inverses)
-        model = try HestiaModel(document: document, issueDate: model.issueDate)
+        let redo = try document.perform(batch: step.commands)
+        model = try HestiaModel(document: document, issueDate: model.issueDate,
+                                storey: step.storeyToShow ?? previousStorey)
         undoStack.removeLast()
-        redoStack.append(redo)
+        redoStack.append(HistoryStep(commands: redo,
+                                     storeyToShow: step.storeyToShow == nil ? nil : previousStorey))
     }
 
     /// Applies again the change last undone, keeping its inverse for undo.
     mutating func redo() throws {
-        guard let commands = redoStack.last else { return }
+        guard let step = redoStack.last else { return }
+        let previousStorey = model.planStorey
         var document = model.document
-        let inverses = try document.perform(batch: commands)
-        model = try HestiaModel(document: document, issueDate: model.issueDate)
+        let inverses = try document.perform(batch: step.commands)
+        model = try HestiaModel(document: document, issueDate: model.issueDate,
+                                storey: step.storeyToShow ?? previousStorey)
         redoStack.removeLast()
-        undoStack.append(inverses)
+        undoStack.append(HistoryStep(commands: inverses,
+                                     storeyToShow: step.storeyToShow == nil ? nil : previousStorey))
     }
 }

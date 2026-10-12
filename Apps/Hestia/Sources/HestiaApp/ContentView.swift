@@ -144,7 +144,7 @@ struct ContentView: View {
     /// commands sit in the window's toolbar.
     private func editor(_ model: HestiaModel, sessionID: UUID) -> some View {
         HStack(spacing: 0) {
-            ToolPalette(selected: tool, hasRoof: model.groundRoof != nil, toolsEnabled: houseMode != .walk,
+            ToolPalette(selected: tool, hasRoof: model.planRoof != nil, toolsEnabled: houseMode != .walk,
                         choose: { select($0) },
                         toggleRoof: { toggleRoof() })
             Divider()
@@ -241,6 +241,9 @@ struct ContentView: View {
                 .help("Redo (Shift-Command-Z)")
         }
         ToolbarItem(placement: .principal) {
+            storeyMenu(model)
+        }
+        ToolbarItem(placement: .principal) {
             Picker("Layout", selection: $layout) {
                 ForEach(Layout.allCases, id: \.self) { choice in
                     Text(choice.toolbarLabel)
@@ -276,7 +279,7 @@ struct ContentView: View {
                         Button(HestiaModel.label(paper)) { exportPDF(model, on: paper) }
                     }
                 }
-                Button("Ground Plan (DXF)") { exportDXF(model) }
+                Button("\(model.planStoreyName) Plan (DXF)") { exportDXF(model) }
                 Button("3D Model (USD)") { exportUSD(model) }
             } label: {
                 Label(Self.exportLabel, systemImage: "square.and.arrow.up")
@@ -290,6 +293,35 @@ struct ContentView: View {
             Button("Inspector", systemImage: "sidebar.right") { showInspector.toggle() }
                 .help("Show or hide the inspector")
         }
+    }
+
+    static let storeyMenuLabel = "Storey"
+
+    /// Which storey the plan shows, with every storey to switch to, the next one up or down from the keyboard,
+    /// and a new storey on top.
+    private func storeyMenu(_ model: HestiaModel) -> some View {
+        Menu {
+            ForEach(model.storeysUpward.reversed(), id: \.id) { storey in
+                Button(storey.id == model.planStorey ? "\u{2713} " + storey.name : storey.name) {
+                    showStorey(storey.id)
+                }
+            }
+            Divider()
+            Button("Storey Above") { showStorey(model.storey(next: true)) }
+                .keyboardShortcut(.upArrow, modifiers: [.command, .option])
+                .disabled(model.storey(next: true) == nil)
+            Button("Storey Below") { showStorey(model.storey(next: false)) }
+                .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+                .disabled(model.storey(next: false) == nil)
+            Divider()
+            Button("Add Storey Above") { addStoreyAbove() }
+        } label: {
+            Label(model.planStoreyName, systemImage: "square.3.layers.3d")
+                .labelStyle(.titleAndIcon)
+                .accessibilityLabel(Self.storeyMenuLabel)
+        }
+        .disabled(houseMode == .walk)
+        .help("Choose the storey to see and draw on (Option-Command-Up and Down), or add one on top")
     }
 
     /// Starts or stops walking, and says how.
@@ -344,7 +376,7 @@ struct ContentView: View {
                    pendingStart: anchor,
                    selected: selectedWalls,
                    penScale: Double(model.planTransform?.scale.modelUnitsPerPaperUnit ?? 1),
-                   overlay: PlanOverlay(document: model.document, storey: model.groundStorey,
+                   overlay: PlanOverlay(document: model.document, storey: model.planStorey,
                                         selected: selectedPlacement),
                    preview: preview(model).shapes, labels: preview(model).labels,
                    zoom: zoom, pan: pan,
@@ -359,7 +391,7 @@ struct ContentView: View {
         ZStack(alignment: .bottomTrailing) {
             HouseView(scene: model.house, document: model.document, meshes: model.meshes, sessionID: sessionID,
                       mode: houseMode, showRoof: showRoof, zoom: houseZoom,
-                      walkStart: Walker.start(in: model.document, storey: model.groundStorey),
+                      walkStart: Walker.start(in: model.document, storey: model.planStorey),
                       house: WalkHouse(document: model.document),
                       onLeaveWalk: {
                           houseMode = .orbit

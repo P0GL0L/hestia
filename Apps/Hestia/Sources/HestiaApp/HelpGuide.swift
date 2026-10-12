@@ -37,6 +37,15 @@ enum HelpGuide {
         Topic(title: "Stairs", keywords: ["stair", "steps"], lines: [
             "Choose Stair, click where the stair starts at the bottom, then click the way it climbs.",
         ]),
+        Topic(title: "Storeys", keywords: ["storey", "story", "floor", "level", "upstairs", "second floor"],
+              lines: [
+            "The storey menu in the toolbar shows which floor the plan draws on. Choose another floor there, or "
+                + "press Option-Command-Up Arrow and Option-Command-Down Arrow.",
+            "Add Storey Above puts a new floor on top, as high as the walls under it. The floor below shows faint "
+                + "under its plan, and new walls snap to its corners and take its wall size.",
+            "A project that keeps its own drawing sheets gets a plan sheet for the new floor, so the set prints it.",
+            "Undo takes a new storey back, with its plan sheet. Switching floors changes nothing in the model.",
+        ]),
         Topic(title: "Furniture and planting", keywords: ["furniture", "sofa", "bed", "tree", "place", "turn",
                                                           "rotate"], lines: [
             "Choose Furnish, pick an item in the inspector's menu by room, and click to place it.",
@@ -84,7 +93,7 @@ enum HelpGuide {
             "Photos are saved in your Hestia-exports folder and open when done.",
         ]),
         Topic(title: "Export drawings and models", keywords: ["export", "pdf", "dxf", "usd", "cad"], lines: [
-            "Export in the toolbar writes the drawing set (PDF), the ground plan (DXF), or the house for 3D "
+            "Export in the toolbar writes the drawing set (PDF), the shown floor plan (DXF), or the house for 3D "
                 + "programs such as Blender (USD).",
             "Drawings are schematic and not for construction.",
         ]),

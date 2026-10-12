@@ -148,7 +148,7 @@ struct HouseSceneTests {
         try session.perform(session.model.doorCommand(on: wall.id, at: feet(5, 0)).erased)
         try session.perform(session.model.casedOpeningCommand(on: wall.id, at: feet(15, 0)).erased)
         try session.perform(session.model.windowCommand(on: wall.id, at: feet(25, 0)).erased)
-        let barriers = WalkBarriers(document: session.model.document, storey: session.model.groundStorey)
+        let barriers = WalkBarriers(document: session.model.document, storey: session.model.planStorey)
         func crosses(_ x: Double) -> Bool {
             var walker = Walker(x: x, y: -4, floor: 0)
             for _ in 0..<40 { walker.step(WalkInput(forward: 1), seconds: 0.05, barriers: barriers) }

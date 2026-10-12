@@ -173,7 +173,7 @@ struct LiveViewSnapshotTests {
         let lights = SCNNode()
         look.roomLights(model.document).forEach(lights.addChildNode)
         world.rootNode.addChildNode(lights)
-        let walker = Walker.start(in: model.document, storey: model.groundStorey)
+        let walker = Walker.start(in: model.document, storey: model.planStorey)
         let eye = walker.eye
         for turn in 0..<4 {
             let heading = walker.heading + Double(turn) * .pi / 2
@@ -219,7 +219,7 @@ struct LiveViewSnapshotTests {
             Point2(x: Length(ticks: Int64((point.x / HouseScene.feetPerTick).rounded())),
                    y: Length(ticks: Int64((point.y / HouseScene.feetPerTick).rounded())))
         }
-        let storey = try #require(model.groundStorey)
+        let storey = try #require(model.planStorey)
         let doors = OpeningDetail.details(model.document, storey: storey)
             .filter { $0.pieces.contains { $0.part == .leaf } }
         let (frame, outside) = try #require(doors.lazy.compactMap { door -> (OpeningDetail.Frame, Double)? in
