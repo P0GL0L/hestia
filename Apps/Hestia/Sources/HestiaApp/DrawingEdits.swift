@@ -163,6 +163,9 @@ enum PlanSelection: Equatable {
     case placement(PlacementID)
     case wall(WallID)
     case patch(TerrainPatchID)
+    case opening(OpeningID)
+    case stair(StairID)
+    case room(RoomID)
 }
 
 extension HestiaModel {

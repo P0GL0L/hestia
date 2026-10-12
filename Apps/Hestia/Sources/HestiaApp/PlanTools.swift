@@ -245,10 +245,7 @@ extension ContentView {
 
     /// What a click picks: a placed item first, then a wall within a few points, then a terrain patch.
     private func pick(_ point: Point2, view: PlanFit, model: HestiaModel) -> PlanSelection? {
-        if let id = model.placementHit(point) { return .placement(id) }
-        if let id = model.wallNear(point, slack: 6 / max(view.scale, 1e-12)) { return .wall(id) }
-        if let id = model.patchHit(point) { return .patch(id) }
-        return nil
+        model.pick(point, slack: 6 / max(view.scale, 1e-12))
     }
 
     private func describeSelection(_ model: HestiaModel) -> String {
@@ -264,6 +261,14 @@ extension ContentView {
         case let .patch(id):
             let name = model.document.terrainPatches.first { $0.id == id }?.name ?? "Area"
             return "\(name) selected. Drag to move it; Delete removes it."
+        case let .opening(id):
+            let kind = model.document.openings.first { $0.id == id }.map { HestiaModel.kindName($0.kind) } ?? "Opening"
+            return "\(kind) selected. Drag to slide it along its wall; the inspector sets its size. Delete removes it."
+        case .stair:
+            return "Stair selected. Drag to move it; the inspector sets its width. Delete removes it."
+        case let .room(id):
+            let name = model.document.rooms.first { $0.id == id }?.name ?? "Room"
+            return "\(name) selected. The inspector renames it. Delete removes the room, not its walls."
         case nil:
             return Tool.select.hint
         }
@@ -285,11 +290,18 @@ extension ContentView {
     /// Applies the same resolved displacement drawn by `selectionPreview`, returning what the edit committed.
     static func commitSelectionMove(_ current: inout EditSession, selection: PlanSelection, from start: Point2,
                                     to end: Point2) throws -> SelectionMove? {
+        // A room is where its walls are: dragging it is refused, saying so.
+        if case .room = selection { try current.move(selection, dx: 0, dy: 0) }
         guard let move = selectionMove(current.model, selection: selection, from: start, to: end) else { return nil }
         switch selection {
         case let .placement(id): try current.movePlacement(id, dx: move.dx, dy: move.dy)
         case let .wall(id): try current.moveWall(id, dx: move.dx, dy: move.dy)
         case let .patch(id): try current.movePatch(id, dx: move.dx, dy: move.dy)
+        case let .opening(id):
+            guard let offset = move.offsetAlongWall else { return nil }
+            try current.slideOpening(id, to: offset)
+        case let .stair(id): try current.shiftStair(id, dx: move.dx, dy: move.dy)
+        case .room: break
         }
         return move
     }
@@ -297,11 +309,7 @@ extension ContentView {
     private func deleteSelection() {
         guard var current = session, let selection else { return }
         do {
-            switch selection {
-            case let .placement(id): try current.removePlacement(id)
-            case let .wall(id): try current.removeWall(id)
-            case let .patch(id): try current.removeTerrainPatch(id)
-            }
+            try current.remove(selection)
             session = current
             self.selection = nil
             status = "Removed. Undo puts it back."
@@ -460,6 +468,9 @@ extension ContentView {
     struct SelectionMove: Equatable {
         var dx: Int64
         var dy: Int64
+        /// For a door or window, where along its wall the move puts it: its checked landing, which the ghost draws
+        /// and the commit sets, so neither works it out again.
+        var offsetAlongWall: Length?
 
         func end(from start: Point2) -> Point2 {
             Point2(x: Length(ticks: start.x.ticks + dx), y: Length(ticks: start.y.ticks + dy))
@@ -482,6 +493,22 @@ extension ContentView {
             guard model.document.walls.contains(where: { $0.id == id }) else { return nil }
         case let .patch(id):
             guard model.document.terrainPatches.contains(where: { $0.id == id }) else { return nil }
+        case let .opening(id):
+            // A door or window lands where its wall can take it, or nowhere: no ghost and no readout. The move is
+            // how far the regenerated outline's first corner goes, which is what the plan redraws.
+            guard let opening = model.document.openings.first(where: { $0.id == id }),
+                  let wall = model.document.walls.first(where: { $0.id == opening.wallID }),
+                  let target = model.slidOpening(id, dx: raw.dx, dy: raw.dy),
+                  let before = model.gap(opening, in: wall).first,
+                  let after = model.gap(target, in: wall).first else { return nil }
+            return SelectionMove(dx: after.x.ticks - before.x.ticks, dy: after.y.ticks - before.y.ticks,
+                                 offsetAlongWall: target.offsetAlongWall)
+        case let .stair(id):
+            guard model.document.stairs.contains(where: { $0.id == id }) else { return nil }
+            let shift = model.stairShift(dx: raw.dx, dy: raw.dy)
+            return SelectionMove(dx: shift.dx, dy: shift.dy)
+        case .room:
+            return nil
         }
         return SelectionMove(dx: HestiaModel.snap(Length(ticks: raw.dx), to: model.snapStep).ticks,
                              dy: HestiaModel.snap(Length(ticks: raw.dy), to: model.snapStep).ticks)
@@ -517,6 +544,23 @@ extension ContentView {
             let corners = patch.boundary.map(shifted)
             return [PlanOverlay.Shape(points: corners, closed: true,
                                       paint: .stroke(red: 0.95, green: 0.45, blue: 0.05, width: 2, dashed: true))]
+        case let .opening(id):
+            // Drawn from the landing itself, as the plan draws the opening once it is there.
+            guard let offset = move.offsetAlongWall,
+                  var opening = model.document.openings.first(where: { $0.id == id }),
+                  let wall = model.document.walls.first(where: { $0.id == opening.wallID }) else { return [] }
+            opening.offsetAlongWall = offset
+            return [ghost(model.gap(opening, in: wall))]
+        case let .stair(id):
+            guard let stair = model.shiftedStair(id, dx: move.dx, dy: move.dy) else { return [] }
+            return [ghost(HestiaModel.stairRectangle(stair))]
+        case .room:
+            return []
         }
+    }
+
+    private static func ghost(_ outline: [Point2]) -> PlanOverlay.Shape {
+        PlanOverlay.Shape(points: outline, closed: true,
+                          paint: .stroke(red: 0.95, green: 0.45, blue: 0.05, width: 2, dashed: true))
     }
 }

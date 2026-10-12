@@ -169,15 +169,8 @@ extension ContentView {
         guard let document = session?.model.document else { return }
         let walls = Set(document.walls.map(\.id))
         roomWalls = roomWalls.filter { walls.contains($0) }
-        switch selection {
-        case let .wall(id) where !walls.contains(id):
+        if let current = selection, session?.model.properties(of: current) == nil {
             selection = nil
-        case let .placement(id) where !document.placements.contains(where: { $0.id == id }):
-            selection = nil
-        case let .patch(id) where !document.terrainPatches.contains(where: { $0.id == id }):
-            selection = nil
-        default:
-            break
         }
     }
 

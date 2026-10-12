@@ -37,11 +37,14 @@ extension ContentView {
                         toolOptions
                     }
                 }
-                if let selection {
-                    section("Selected", symbol: "checkmark.circle") {
-                        Text(describe(selection, in: model))
-                            .font(.callout)
-                        Text("Drag it on the plan to move it. The Delete tool removes it.")
+                if let selection, let details = model.properties(of: selection) {
+                    section(details.title, symbol: "checkmark.circle") {
+                        ForEach(details.rows, id: \.label) { row in
+                            // Keyed by its value, so the field shows the new figure after a change or Undo.
+                            PropertyRow(property: row) { text in setProperty(row, to: text, on: selection) }
+                                .id(row.label + row.value)
+                        }
+                        Text("Type a new figure and press Return. Undo puts it back.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -93,20 +96,15 @@ extension ContentView {
         }
     }
 
-    /// What is selected, in a few words.
-    func describe(_ selection: PlanSelection, in model: HestiaModel) -> String {
-        switch selection {
-        case let .wall(id):
-            guard let wall = model.document.walls.first(where: { $0.id == id }) else { return "A wall" }
-            let dx = Double(wall.end.x.ticks - wall.start.x.ticks), dy = Double(wall.end.y.ticks - wall.start.y.ticks)
-            let length = Length(ticks: Int64((dx * dx + dy * dy).squareRoot().rounded()))
-            let units = model.document.project.displayUnits ?? .feetInchesFractions
-            return "Wall, " + LengthFormatting.format(length, style: units)
-        case let .placement(id):
-            guard let placement = model.document.placements.first(where: { $0.id == id }) else { return "An item" }
-            return Furniture.item(placement.catalogItemID)?.name ?? "An item"
-        case let .patch(id):
-            return model.document.terrainPatches.first { $0.id == id }?.name ?? "A site area"
+    /// Changes one figure of the selection from the inspector, as one undoable step.
+    func setProperty(_ property: ElementProperty, to text: String, on selection: PlanSelection) {
+        guard var current = session, let field = property.field, text != property.value else { return }
+        do {
+            status = try current.set(field, to: text, on: selection)
+            session = current
+            forgetRemoved()
+        } catch {
+            status = HestiaModel.describe(error)
         }
     }
 
@@ -120,5 +118,29 @@ extension ContentView {
             ("Windows", "\(document.openings.filter(\.kind.isWindow).count)"),
             ("Furniture", "\(document.placements.count)"),
         ]
+    }
+}
+
+/// One line of the inspector: a name and its value, typed over when it can be changed.
+struct PropertyRow: View {
+    var property: ElementProperty
+    var commit: (String) -> Void
+    @State private var text = ""
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(property.label)
+                .foregroundColor(.secondary)
+            Spacer(minLength: 8)
+            if property.field != nil {
+                TextField(property.label, text: $text, onCommit: { commit(text) })
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 110)
+                    .onAppear { text = property.value }
+            } else {
+                Text(property.value)
+            }
+        }
+        .font(.callout)
     }
 }
