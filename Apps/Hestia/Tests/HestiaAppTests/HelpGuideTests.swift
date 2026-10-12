@@ -21,6 +21,14 @@ struct HelpGuideTests {
         #expect(HelpGuide.topics.allSatisfy { !$0.lines.isEmpty })
     }
 
+    @Test("Draw walls help explains live direction and pointer coordinates")
+    func liveReadouts() throws {
+        let topic = try #require(HelpGuide.topics.first { $0.title == "Draw walls" })
+        let text = topic.lines.joined(separator: " ")
+        #expect(text.contains("degrees from east, counterclockwise"))
+        #expect(text.contains("pointer's X and Y in the project's units"))
+    }
+
     @Test("Export help says DXF writes the floor currently shown")
     func selectedFloorDXF() throws {
         let topic = try #require(HelpGuide.topics.first { $0.title == "Export drawings and models" })

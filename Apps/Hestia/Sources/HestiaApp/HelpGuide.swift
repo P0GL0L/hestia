@@ -24,6 +24,8 @@ enum HelpGuide {
             "For an exact wall, type its length and press Return: 12'6\", 12' 6-1/2\", 150\", or a plain 12 for "
                 + "feet; in metric plans 3.8 m, 380 cm, 3800 mm, or a plain 3.8 for meters.",
             "Points snap to wall ends and the grid. Esc or a right-click ends the chain.",
+            "While you draw, the wall's length and direction (degrees from east, counterclockwise) show beside "
+                + "it, and the status bar shows the pointer's X and Y in the project's units.",
         ]),
         Topic(title: "Draw rooms", keywords: ["room", "rectangle", "size", "name", "pick walls"], lines: [
             "Choose Room, name it, then drag out the room or click two corners. Its four walls come with it.",

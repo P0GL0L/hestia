@@ -14,8 +14,11 @@ extension ContentView {
         guard let model = session?.model else { return }
         switch input {
         case let .moved(point):
-            hover = target(view.paper(point), model)
+            let pointer = Self.pointerState(view.paper(point), tool: tool, anchor: anchor, model: model)
+            pointerPosition = pointer.position
+            hover = pointer.target
         case .exited:
+            pointerPosition = nil
             hover = nil
         case let .down(point, clicks):
             press = Press(model: view.paper(point), view: point)
@@ -50,6 +53,17 @@ extension ContentView {
         Self.target(raw, tool: tool, anchor: anchor, model: model)
     }
 
+    struct PointerState: Equatable {
+        var position: Point2
+        var target: Point2
+    }
+
+    /// The point reported for the pointer and the separately resolved point used by the active drawing tool.
+    static func pointerState(_ raw: Point2, tool: Tool, anchor: Point2?, model: HestiaModel) -> PointerState {
+        let resolved = target(raw, tool: tool, anchor: anchor, model: model)
+        return PointerState(position: raw, target: resolved)
+    }
+
     /// `target` for a given tool and chain anchor. The anchor is taken but never used to square the point, so a
     /// near-axis wall from it stays as drawn.
     static func target(_ raw: Point2, tool: Tool, anchor: Point2?, model: HestiaModel) -> Point2 {
@@ -80,7 +94,9 @@ extension ContentView {
                 selection = pick(press.model, view: view, model: model)
             }
         }
-        hover = target(view.paper(point), model)
+        let pointer = Self.pointerState(view.paper(point), tool: tool, anchor: anchor, model: model)
+        pointerPosition = pointer.position
+        hover = pointer.target
     }
 
     private func release(at point: CGPoint, view: PlanFit, model: HestiaModel) {
@@ -255,18 +271,27 @@ extension ContentView {
 
     private func move(by end: Point2, from start: Point2) {
         guard var current = session, let selection else { return }
-        let (dx, dy) = (end.x.ticks - start.x.ticks, end.y.ticks - start.y.ticks)
         do {
-            switch selection {
-            case let .placement(id): try current.movePlacement(id, dx: dx, dy: dy)
-            case let .wall(id): try current.moveWall(id, dx: dx, dy: dy)
-            case let .patch(id): try current.movePatch(id, dx: dx, dy: dy)
+            guard try Self.commitSelectionMove(&current, selection: selection, from: start, to: end) != nil else {
+                return
             }
             session = current
             status = "Moved. Undo puts it back."
         } catch {
             status = HestiaModel.describe(error)
         }
+    }
+
+    /// Applies the same resolved displacement drawn by `selectionPreview`, returning what the edit committed.
+    static func commitSelectionMove(_ current: inout EditSession, selection: PlanSelection, from start: Point2,
+                                    to end: Point2) throws -> SelectionMove? {
+        guard let move = selectionMove(current.model, selection: selection, from: start, to: end) else { return nil }
+        switch selection {
+        case let .placement(id): try current.movePlacement(id, dx: move.dx, dy: move.dy)
+        case let .wall(id): try current.moveWall(id, dx: move.dx, dy: move.dy)
+        case let .patch(id): try current.movePatch(id, dx: move.dx, dy: move.dy)
+        }
+        return move
     }
 
     private func deleteSelection() {
@@ -390,11 +415,7 @@ extension ContentView {
         switch tool {
         case .wall, .stair:
             guard let start else { return result }
-            result.shapes.append(PlanOverlay.band(start, hover))
-            let length = typed.isEmpty ? model.written(PlanGeometry.distance(start, hover)) : typed + " \u{21A9}"
-            if let middle = PlanOverlay.middle([start, hover]) {
-                result.labels.append(.init(position: middle, text: length, size: 12, highlighted: true))
-            }
+            result = Self.segmentPreview(model, tool: tool, from: start, to: hover, typed: typed)
         case .room, .site:
             guard let start else { return result }
             result.shapes += PlanOverlay.box(start, hover, fill: tool == .site ? siteKind.look : .woodFloor)
@@ -412,18 +433,75 @@ extension ContentView {
                                                        ghost: true)
             }
         case .select:
-            if dragging, let press { result.shapes += movedGhost(model, by: hover, from: press.model) }
+            if dragging, let press, let selection {
+                result = Self.selectionPreview(model, selection: selection, from: press.model, to: hover)
+            }
         default:
             break
         }
         return result
     }
 
-    /// The selection as it would land after a drag from `start` to `end`.
-    private func movedGhost(_ model: HestiaModel, by end: Point2, from start: Point2) -> [PlanOverlay.Shape] {
-        let (dx, dy) = (end.x.ticks - start.x.ticks, end.y.ticks - start.y.ticks)
+    /// The wall or stair run under the pointer, including the live measurement label.
+    static func segmentPreview(_ model: HestiaModel, tool: Tool, from start: Point2, to end: Point2,
+                               typed: String) -> Preview {
+        guard tool == .wall || tool == .stair else { return Preview() }
+        var result = Preview(shapes: [PlanOverlay.band(start, end)])
+        // A wall reads its length and direction; a stair, its run.
+        let drawn = tool == .wall ? PlanReadout.wall(from: start, to: end, model: model)
+            : model.written(PlanGeometry.distance(start, end))
+        let length = typed.isEmpty ? drawn : typed + " \u{21A9}"
+        if let middle = PlanOverlay.middle([start, end]) {
+            result.labels.append(.init(position: middle, text: length, size: 12, highlighted: true))
+        }
+        return result
+    }
+
+    struct SelectionMove: Equatable {
+        var dx: Int64
+        var dy: Int64
+
+        func end(from start: Point2) -> Point2 {
+            Point2(x: Length(ticks: start.x.ticks + dx), y: Length(ticks: start.y.ticks + dy))
+        }
+    }
+
+    /// The grid-resolved displacement shared by a selection's preview, readout, and committed edit.
+    static func selectionMove(_ model: HestiaModel, selection: PlanSelection, from start: Point2,
+                              to end: Point2) -> SelectionMove? {
+        let raw = (dx: end.x.ticks - start.x.ticks, dy: end.y.ticks - start.y.ticks)
+        switch selection {
+        case let .placement(id):
+            guard let placement = model.document.placements.first(where: { $0.id == id }) else { return nil }
+            guard raw.dx != 0 || raw.dy != 0 else { return SelectionMove(dx: 0, dy: 0) }
+            let target = model.snapped(Point2(x: Length(ticks: placement.position.x.ticks + raw.dx),
+                                              y: Length(ticks: placement.position.y.ticks + raw.dy)))
+            return SelectionMove(dx: target.x.ticks - placement.position.x.ticks,
+                                 dy: target.y.ticks - placement.position.y.ticks)
+        case let .wall(id):
+            guard model.document.walls.contains(where: { $0.id == id }) else { return nil }
+        case let .patch(id):
+            guard model.document.terrainPatches.contains(where: { $0.id == id }) else { return nil }
+        }
+        return SelectionMove(dx: HestiaModel.snap(Length(ticks: raw.dx), to: model.snapStep).ticks,
+                             dy: HestiaModel.snap(Length(ticks: raw.dy), to: model.snapStep).ticks)
+    }
+
+    /// The selected object as it would look after a drag, with the movement readout beside its resolved target.
+    static func selectionPreview(_ model: HestiaModel, selection: PlanSelection, from start: Point2,
+                                 to end: Point2) -> Preview {
+        guard let move = selectionMove(model, selection: selection, from: start, to: end) else { return Preview() }
+        let target = move.end(from: start)
+        return Preview(shapes: movedGhost(model, selection: selection, move: move),
+                       labels: [.init(position: target, text: PlanReadout.move(from: start, to: target, model: model),
+                                      size: 12, highlighted: true)])
+    }
+
+    /// The selection as it would land after the resolved movement.
+    private static func movedGhost(_ model: HestiaModel, selection: PlanSelection,
+                                   move: SelectionMove) -> [PlanOverlay.Shape] {
         func shifted(_ point: Point2) -> Point2 {
-            Point2(x: Length(ticks: point.x.ticks + dx), y: Length(ticks: point.y.ticks + dy))
+            Point2(x: Length(ticks: point.x.ticks + move.dx), y: Length(ticks: point.y.ticks + move.dy))
         }
         switch selection {
         case let .placement(id):
@@ -439,8 +517,6 @@ extension ContentView {
             let corners = patch.boundary.map(shifted)
             return [PlanOverlay.Shape(points: corners, closed: true,
                                       paint: .stroke(red: 0.95, green: 0.45, blue: 0.05, width: 2, dashed: true))]
-        case nil:
-            return []
         }
     }
 }

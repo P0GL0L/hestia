@@ -72,6 +72,8 @@ struct ContentView: View {
     @State var anchor: Point2?
     /// Where the current chain of walls began, so clicking it again closes the outline.
     @State var chainStart: Point2?
+    /// The unsnapped model point under the pointer, for the coordinate status readout.
+    @State var pointerPosition: Point2?
     /// The model point under the pointer, as the current tool would use it.
     @State var hover: Point2?
     @State var press: Press?
@@ -196,6 +198,11 @@ struct ContentView: View {
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.black.opacity(0.12), lineWidth: 1))
     }
 
+    static func pointerReadout(_ position: Point2?, model: HestiaModel?, layout: Layout) -> String? {
+        guard let position, let model, layout != .house else { return nil }
+        return PlanReadout.position(position, model: model)
+    }
+
     /// What the chosen tool does or what just happened, on the left; where the last export went, on the right.
     private var statusBar: some View {
         HStack(spacing: 8) {
@@ -207,6 +214,18 @@ struct ContentView: View {
                 .truncationMode(.tail)
                 .layoutPriority(1)
             Spacer(minLength: 12)
+            if let readout = Self.pointerReadout(pointerPosition, model: session?.model, layout: layout) {
+                // Where the pointer is on the plan, before drawing-tool snapping.
+                Text(readout)
+                    .font(.caption.monospacedDigit())
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    // Coordinates are actionable feedback; shorten the status and export notice before them.
+                    .fixedSize(horizontal: true, vertical: false)
+                    .layoutPriority(2)
+                Divider()
+                    .frame(height: 14)
+            }
             Text(exportMessage)
                 .font(.caption)
                 .foregroundColor(.secondary)
