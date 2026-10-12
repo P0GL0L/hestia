@@ -60,8 +60,16 @@ enum HelpGuide {
                 + "Garden bed), and drag out the area. Type a size such as 40 x 20 and press Return for an exact one.",
         ]),
         Topic(title: "Select, move, turn, and delete", keywords: ["select", "move", "drag", "delete", "remove",
-                                                                 "rotate", "turn"], lines: [
-            "Choose Select and click a wall, an item, or a site area. Drag it to move it.",
+                                                                 "rotate", "turn", "inspector", "properties",
+                                                                 "size", "width", "rename"], lines: [
+            "Choose Select and click a wall, door, window, cased opening, stair, room, item, or site area. Drag it "
+                + "to move it: a door, window, or cased opening slides along its wall, a stair moves whole, and a "
+                + "room stays with its walls.",
+            "The inspector lists what is selected. Type a new length, thickness, height, width, sill, or room name "
+                + "and press Return; one Undo puts it back. A new wall length moves its end, and joined walls follow.",
+            "A label field (Plan label, Width label, Schedule width) prints your text on that dimension of the "
+                + "drawings, such as VERIFY or 14'-0\" CLR, instead of the measured figure; empty it to bring the "
+                + "figure back. The model's size does not change.",
             "R turns a selected item a quarter turn. Delete or Backspace removes what is selected.",
             "The Delete tool removes whatever you click: a door, window, opening, stair, wall, item, area, or room.",
         ]),

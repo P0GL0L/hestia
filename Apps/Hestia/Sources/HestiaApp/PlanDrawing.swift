@@ -208,9 +208,10 @@ enum PlanGeometry {
 /// Lengths typed while drawing. Imperial projects read `12`, `12'`, `12'6`, `12' 6"`, `12'-6 1/2"`, `144"`,
 /// and `12.5`; a bare number is feet. Metric projects read `3.6`, `3.6 m`, `3600 mm`, and `360 cm`; a bare
 /// number is metres. Either reads the other's units when they are written out. Nil when the text is not a
-/// length or is not positive.
+/// length or is not positive; with `allowingZero`, zero reads too, for a figure that can be nothing, such as a
+/// window's sill or a door's distance from its wall's start.
 enum LengthEntry {
-    static func parse(_ text: String, metric: Bool) -> Length? {
+    static func parse(_ text: String, metric: Bool, allowingZero: Bool = false) -> Length? {
         let trimmed = text.trimmingCharacters(in: .whitespaces).lowercased()
         guard !trimmed.isEmpty else { return nil }
         let result: Length?
@@ -225,7 +226,7 @@ enum LengthEntry {
         } else {
             result = imperial(trimmed)
         }
-        guard let result, result.ticks > 0 else { return nil }
+        guard let result, result.ticks > 0 || (allowingZero && result.ticks == 0) else { return nil }
         return result
     }
 

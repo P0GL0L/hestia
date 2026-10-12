@@ -32,7 +32,9 @@ struct ContentView: View {
 
         var hint: String {
             switch self {
-            case .select: return "Click a wall, an item, or a patch to select it. Drag to move it; Delete removes it."
+            case .select: return "Click a wall, door, window, cased opening, stair, room, item, or patch to select "
+                + "it. Drag to move it: a door, window, or cased opening slides along its wall, a stair moves whole, "
+                + "and a room stays with its walls. Delete removes it."
             case .wall: return "Click to start a wall, then click each corner. Type a length and press Return for an "
                 + "exact wall. Esc or right-click stops."
             case .room: return "Drag out a room, or click two corners. Type a size such as 12 x 10 and press Return."
@@ -395,8 +397,7 @@ struct ContentView: View {
                    pendingStart: anchor,
                    selected: selectedWalls,
                    penScale: Double(model.planTransform?.scale.modelUnitsPerPaperUnit ?? 1),
-                   overlay: PlanOverlay(document: model.document, storey: model.planStorey,
-                                        selected: selectedPlacement),
+                   overlay: overlay(model),
                    preview: preview(model).shapes, labels: preview(model).labels,
                    zoom: zoom, pan: pan,
                    onInput: { input, fit in planInput(input, fit: fit) })
@@ -462,6 +463,18 @@ struct ContentView: View {
         .buttonStyle(.plain)
         .help(help)
         .accessibilityLabel(help)
+    }
+
+    /// The plan's overlay, with the selected door, window, stair, or room outlined in the accent color.
+    private func overlay(_ model: HestiaModel) -> PlanOverlay {
+        var overlay = PlanOverlay(document: model.document, storey: model.planStorey, selected: selectedPlacement)
+        if let selection, let outline = model.outline(of: selection) {
+            let accent = PlanOverlay.accent
+            overlay.over.append(PlanOverlay.Shape(points: outline, closed: true,
+                                                  paint: .stroke(red: accent.red, green: accent.green,
+                                                                 blue: accent.blue, width: 3, dashed: false)))
+        }
+        return overlay
     }
 
     private var selectedWalls: Set<UUID> {
