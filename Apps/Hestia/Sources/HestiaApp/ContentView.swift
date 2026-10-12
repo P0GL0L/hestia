@@ -3,6 +3,8 @@ import AppKit
 import SwiftUI
 
 struct ContentView: View {
+    static let minimumWindowWidth: CGFloat = 1280
+
     /// What the plan view's clicks and drags do.
     enum Tool: Equatable {
         /// Click to pick a wall, a placed item, or a terrain patch; drag to move it.
@@ -52,6 +54,8 @@ struct ContentView: View {
         case plan = "Plan"
         case split = "Plan + 3D"
         case house = "3D"
+
+        var toolbarLabel: String { rawValue }
     }
 
     /// A press on the plan, until it is released.
@@ -89,6 +93,7 @@ struct ContentView: View {
     /// Zoom steps asked of the 3D view by its + and − buttons; the view moves by the change.
     @State var houseZoom = 0
     @State var showHelp = false
+    @State var showInspector = true
     /// Whether Blender is rendering a photo.
     @State var rendering = false
     @State var status = Tool.wall.hint
@@ -134,129 +139,164 @@ struct ContentView: View {
         .onDisappear { UnsavedChanges.shared.remove(windowID) }
     }
 
+    /// The window as an architecture app lays it out: the tools down the left, the plan and the house in the
+    /// middle, the inspector down the right, and a status bar along the foot. File, edit, view, and output
+    /// commands sit in the window's toolbar.
     private func editor(_ model: HestiaModel, sessionID: UUID) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text(model.document.project.name)
-                    .font(.title2.weight(.semibold))
-                Text(OutputHonesty.schematicStamp)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                Spacer(minLength: 12)
-                Picker("", selection: $layout) {
-                    ForEach(Layout.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(SegmentedPickerStyle())
-                .labelsHidden()
-                .fixedSize()
+        HStack(spacing: 0) {
+            ToolPalette(selected: tool, hasRoof: model.groundRoof != nil, toolsEnabled: houseMode != .walk,
+                        choose: { select($0) },
+                        toggleRoof: { toggleRoof() })
+            Divider()
+            VStack(spacing: 0) {
+                workspace(model, sessionID: sessionID)
+                Divider()
+                statusBar
             }
-            fileRow(model)
-            toolRow(model)
-            HStack(spacing: 12) {
-                if layout != .house {
-                    plan(model)
-                }
-                if layout != .plan {
-                    house(model, sessionID: sessionID)
-                }
-            }
-            // The status on its own line; where the last export went, at the right of it.
-            HStack(spacing: 12) {
-                Text(status)
-                    .font(.callout)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .layoutPriority(1)
-                Spacer(minLength: 12)
-                Text(exportMessage)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+            if showInspector {
+                Divider()
+                inspector(model)
             }
         }
-        .padding(16)
-        .frame(minWidth: 1100, minHeight: 720)
+        .frame(minWidth: Self.minimumWindowWidth, minHeight: 720)
+        .navigationTitle(model.document.project.name)
+        .navigationSubtitle(OutputHonesty.schematicStamp)
+        .toolbar { toolbar(model) }
+        .background {
+            // Command-S writes the remembered file. It is unseen, so it adds no button and no menu.
+            Button("Save to the Current File") { saveToCurrentFile() }
+                .keyboardShortcut("s", modifiers: .command)
+                .opacity(0)
+                .frame(width: 0, height: 0)
+                .accessibilityHidden(true)
+        }
         .sheet(isPresented: $showHelp) {
             HelpView { showHelp = false }
         }
     }
 
-    /// File and Undo on the left, export on the right. Each group keeps its ideal width, so no label is cut
-    /// short at the narrowest window.
-    private func fileRow(_ model: HestiaModel) -> some View {
-        HStack(spacing: 12) {
-            HStack(spacing: 6) {
-                Button("New") { newModel() }
-                Button("Open…") { openModel() }
-                Button("Save…") { saveModel() }
-                    .background {
-                        // Command-S writes the remembered file. It is unseen, so it adds no button and no menu.
-                        Button("Save to the Current File") { saveToCurrentFile() }
-                            .keyboardShortcut("s", modifiers: .command)
-                            .opacity(0)
-                            .frame(width: 0, height: 0)
-                            .accessibilityHidden(true)
-                    }
-                Button("Undo") { undo() }
-                    .keyboardShortcut("z", modifiers: .command)
-                    .disabled(!(session?.canUndo ?? false))
-                Button("Redo") { redo() }
-                    .keyboardShortcut("z", modifiers: [.command, .shift])
-                    .disabled(!(session?.canRedo ?? false))
-                Button("Help") { showHelp = true }
-                    .keyboardShortcut("?", modifiers: .command)
+    /// The plan, the house, or both side by side, each on a card in a soft gray well.
+    private func workspace(_ model: HestiaModel, sessionID: UUID) -> some View {
+        HStack(spacing: 10) {
+            if layout != .house {
+                card { plan(model) }
             }
-            .fixedSize()
+            if layout != .plan {
+                card { house(model, sessionID: sessionID) }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .underPageBackgroundColor))
+    }
+
+    private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.black.opacity(0.12), lineWidth: 1))
+    }
+
+    /// What the chosen tool does or what just happened, on the left; where the last export went, on the right.
+    private var statusBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: tool.symbol)
+                .foregroundColor(.secondary)
+            Text(status)
+                .font(.callout)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .layoutPriority(1)
             Spacer(minLength: 12)
-            HStack(spacing: 6) {
-                Button("Export PDF") { exportPDF(model) }
-                Button("Export DXF") { exportDXF(model) }
-                Button("Export USD") { exportUSD(model) }
-                Menu(rendering ? "Rendering…" : "Render Photo") {
-                    Button("Outside, from the street") { renderPhoto(model, view: .exterior) }
-                    Button("Inside the house") { renderPhoto(model, view: .interior) }
-                    Divider()
-                    Text("Materials, models, and sky: Poly Haven, CC0")
+            Text(exportMessage)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 30)
+    }
+
+    /// File and history on the leading side, the layout in the middle, walking, output, help, and the inspector
+    /// on the trailing side.
+    static let renderPhotoLabel = "Render Photo"
+    static let exportLabel = "Export"
+
+    @ToolbarContentBuilder
+    private func toolbar(_ model: HestiaModel) -> some ToolbarContent {
+        ToolbarItemGroup(placement: .navigation) {
+            Button("New", systemImage: "doc.badge.plus") { newModel() }
+                .help("Start an empty model")
+            Button("Open", systemImage: "folder") { openModel() }
+                .help("Open a saved model")
+            Button("Save", systemImage: "square.and.arrow.down") { saveModel() }
+                .help("Save the model as… (Command-S saves to the current file)")
+            Button("Undo", systemImage: "arrow.uturn.backward") { undo() }
+                .keyboardShortcut("z", modifiers: .command)
+                .disabled(!(session?.canUndo ?? false))
+                .help("Undo (Command-Z)")
+            Button("Redo", systemImage: "arrow.uturn.forward") { redo() }
+                .keyboardShortcut("z", modifiers: [.command, .shift])
+                .disabled(!(session?.canRedo ?? false))
+                .help("Redo (Shift-Command-Z)")
+        }
+        ToolbarItem(placement: .principal) {
+            Picker("Layout", selection: $layout) {
+                ForEach(Layout.allCases, id: \.self) { choice in
+                    Text(choice.toolbarLabel)
+                        .accessibilityLabel(choice.toolbarLabel)
+                        .tag(choice)
                 }
-                .disabled(rendering)
-                .fixedSize()
-                Text("Powered by Poly Haven")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                    .fixedSize()
             }
-            .fixedSize()
+            .pickerStyle(SegmentedPickerStyle())
+            .labelsHidden()
+            .help("Show the plan, the house in 3D, or both")
+        }
+        ToolbarItemGroup(placement: .primaryAction) {
+            Button(houseMode == .walk ? "Stop Walking" : "Walk Inside",
+                   systemImage: houseMode == .walk ? "figure.stand" : "figure.walk") { toggleWalk() }
+            .disabled(layout == .plan)
+            .help("Walk through the house at eye height")
+            Menu {
+                Button("Outside, from the street") { renderPhoto(model, view: .exterior) }
+                Button("Inside the house") { renderPhoto(model, view: .interior) }
+                Divider()
+                Text("Materials, models, and sky: Poly Haven, CC0")
+            } label: {
+                Label(Self.renderPhotoLabel, systemImage: rendering ? "hourglass" : "camera.aperture")
+                    .accessibilityLabel(Self.renderPhotoLabel)
+            }
+            .disabled(rendering)
+            .accessibilityLabel(Self.renderPhotoLabel)
+            .help(rendering ? "Rendering..." : "Render a photoreal still with Blender")
+            Menu {
+                Button("Drawing Set (PDF)") { exportPDF(model) }
+                Button("Ground Plan (DXF)") { exportDXF(model) }
+                Button("3D Model (USD)") { exportUSD(model) }
+            } label: {
+                Label(Self.exportLabel, systemImage: "square.and.arrow.up")
+                    .accessibilityLabel(Self.exportLabel)
+            }
+            .accessibilityLabel(Self.exportLabel)
+            .help("Export the drawings or the model to ~/Hestia-exports")
+            Button("Help", systemImage: "questionmark.circle") { showHelp = true }
+                .keyboardShortcut("?", modifiers: .command)
+                .help("How to use Hestia (Command-?)")
+            Button("Inspector", systemImage: "sidebar.right") { showInspector.toggle() }
+                .help("Show or hide the inspector")
         }
     }
 
-    /// The tools; under them, what the chosen tool needs: a room's name, the item to place, or the kind of site
-    /// area.
-    private func toolRow(_ model: HestiaModel) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 4) {
-                toolButton("Select", .select)
-                toolButton("Wall", .wall)
-                toolButton("Room", .room)
-                toolButton("Door", .door)
-                toolButton("Window", .window)
-                toolButton("Opening", .opening)
-                toolButton("Stair", .stair)
-                toolButton("Furniture", .furniture)
-                toolButton("Site", .site)
-                toolButton("Delete", .delete)
-                Button(model.groundRoof == nil ? "Add Roof" : "Remove Roof") { toggleRoof() }
-            }
-            .fixedSize()
-            if [.room, .roomFromWalls, .furniture, .site].contains(tool) {
-                HStack(spacing: 6) {
-                    toolOptions
-                }
-            }
-        }
+    /// Starts or stops walking, and says how.
+    func toggleWalk() {
+        houseMode = houseMode == .walk ? .orbit : .walk
+        status = houseMode == .walk ? Self.walkingStatus : Self.orbitingStatus
     }
 
-    @ViewBuilder private var toolOptions: some View {
+    static let walkingStatus = "Walking. W A S D or the arrows move, drag to look, Shift runs, Esc stops."
+    static let orbitingStatus = "Orbiting. Drag to turn the house; scroll, pinch, or + and \u{2212} to zoom."
+
+    @ViewBuilder var toolOptions: some View {
         switch tool {
         case .room, .roomFromWalls:
             TextField("Room name", text: $roomName)
@@ -308,49 +348,64 @@ struct ContentView: View {
             .background(Color.white)
     }
 
+    /// The house in 3D, with its controls floating over the bottom right corner and, while walking, the keys
+    /// to use along the bottom.
     private func house(_ model: HestiaModel, sessionID: UUID) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Button(houseMode == .walk ? "Stop Walking" : "Walk Inside") {
-                    houseMode = houseMode == .walk ? .orbit : .walk
-                    status = houseMode == .walk
-                        ? "Walking. W A S D or the arrows move, drag to look, Shift runs, Esc stops."
-                        : "Orbiting. Drag to turn the house; scroll, pinch, or + and \u{2212} to zoom."
+        ZStack(alignment: .bottomTrailing) {
+            HouseView(scene: model.house, document: model.document, meshes: model.meshes, sessionID: sessionID,
+                      mode: houseMode, showRoof: showRoof, zoom: houseZoom,
+                      walkStart: Walker.start(in: model.document, storey: model.groundStorey),
+                      barriers: WalkBarriers(document: model.document, storey: model.groundStorey),
+                      onLeaveWalk: {
+                          houseMode = .orbit
+                          status = Self.orbitingStatus
+                      })
+            if houseMode == .walk {
+                Text("W A S D or arrows to walk · drag to look · Shift to run · Esc to stop")
+                    .font(.caption)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(Color.black.opacity(0.6)))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.bottom, 52)
+            }
+            HStack(spacing: 2) {
+                floating(houseMode == .walk ? "figure.stand" : "figure.walk",
+                         houseMode == .walk ? "Stop walking (Esc)" : "Walk inside") { toggleWalk() }
+                floating(showRoof ? "house.fill" : "house", showRoof ? "Hide the roof" : "Show the roof") {
+                    showRoof.toggle()
                 }
-                .fixedSize()
-                Toggle("Roof", isOn: $showRoof)
-                    .fixedSize()
                 // Zoom for the orbiting view; the scroll wheel and a trackpad pinch zoom too.
-                Button("\u{2212}") { houseZoom = HouseZoom.pressed(houseZoom, by: -1) }
-                    .keyboardShortcut("-", modifiers: .command)
-                    .disabled(houseMode == .walk)
-                Button("+") { houseZoom = HouseZoom.pressed(houseZoom, by: 1) }
-                    .keyboardShortcut("=", modifiers: .command)
-                    .disabled(houseMode == .walk)
-                Spacer(minLength: 0)
-            }
-            ZStack(alignment: .bottom) {
-                HouseView(scene: model.house, document: model.document, meshes: model.meshes, sessionID: sessionID,
-                          mode: houseMode, showRoof: showRoof, zoom: houseZoom,
-                          walkStart: Walker.start(in: model.document, storey: model.groundStorey),
-                          barriers: WalkBarriers(document: model.document, storey: model.groundStorey),
-                          onLeaveWalk: {
-                              houseMode = .orbit
-                              status = "Orbiting. Drag to turn the house; scroll, pinch, or + and \u{2212} to zoom."
-                          })
-                if houseMode == .walk {
-                    Text("W A S D or arrows to walk · drag to look · Shift to run · Esc to stop")
-                        .font(.caption)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(Color.black.opacity(0.55))
-                        .foregroundColor(.white)
-                        .cornerRadius(6)
-                        .padding(10)
+                floating("minus.magnifyingglass", "Zoom out (Command-minus)") {
+                    houseZoom = HouseZoom.pressed(houseZoom, by: -1)
                 }
+                .keyboardShortcut("-", modifiers: .command)
+                .disabled(houseMode == .walk)
+                floating("plus.magnifyingglass", "Zoom in (Command-=)") {
+                    houseZoom = HouseZoom.pressed(houseZoom, by: 1)
+                }
+                .keyboardShortcut("=", modifiers: .command)
+                .disabled(houseMode == .walk)
             }
+            .padding(4)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+            .padding(10)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// One control floating over the 3D view.
+    private func floating(_ symbol: String, _ help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 14, weight: .regular))
+                .frame(width: 30, height: 26)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(help)
     }
 
     private var selectedWalls: Set<UUID> {
@@ -362,18 +417,6 @@ struct ContentView: View {
     private var selectedPlacement: PlacementID? {
         if case let .placement(id) = selection { return id }
         return nil
-    }
-
-    /// A tool button, marked while its tool is the one clicks use.
-    private func toolButton(_ title: String, _ choice: Tool) -> some View {
-        let selected = tool == choice || (choice == .room && tool == .roomFromWalls)
-        return Button(action: { select(choice) }) {
-            Text(title)
-                .fontWeight(selected ? .bold : .regular)
-                .padding(.horizontal, 4)
-                .background(RoundedRectangle(cornerRadius: 4)
-                    .fill(selected ? Color.accentColor.opacity(0.3) : Color.clear))
-        }
     }
 
     func select(_ choice: Tool) {
