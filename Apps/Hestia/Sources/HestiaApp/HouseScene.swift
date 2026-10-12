@@ -95,6 +95,7 @@ struct HouseScene: Equatable, Sendable {
         var outdoor: [Look: Solid] = [:]
         Self.addEngineMeshes(meshes, to: &house)
         OpeningDetail.add(document, to: &house)
+        Baseboards.add(document, to: &house)
         Self.addRooms(document, to: &house)
         for placement in document.placements {
             let item = Furniture.item(placement.catalogItemID) ?? Furniture.placeholder(placement.catalogItemID)
