@@ -30,7 +30,7 @@ extension EditSession {
         }
         var commands: [AnyCommand] = []
         var boundary: [WallID] = []
-        let existing = model.document.walls.filter { $0.storeyID == model.groundStorey }
+        let existing = model.document.walls.filter { $0.storeyID == model.planStorey }
         for index in corners.indices {
             let start = corners[index], end = corners[(index + 1) % corners.count]
             if let wall = existing.first(where: { covers($0, start, end) }) {
@@ -72,11 +72,11 @@ extension EditSession {
         try perform(batch: commands)
     }
 
-    /// Places a catalog item on the ground storey with its middle at a model point, turned `degrees`
+    /// Places a catalog item on the plan's storey with its middle at a model point, turned `degrees`
     /// counterclockwise. Returns the new placement's ID.
     @discardableResult
     mutating func place(_ item: FurnitureItem, at point: Point2, degrees: Int) throws -> PlacementID {
-        guard let storey = model.groundStorey else {
+        guard let storey = model.planStorey else {
             throw HestiaModel.LoadError(message: "The model has no storey to place furniture on.")
         }
         let id = PlacementID(UUID())
@@ -166,9 +166,9 @@ enum PlanSelection: Equatable {
 }
 
 extension HestiaModel {
-    /// The placed item under a model point on the ground storey: the last placed, when items overlap.
+    /// The placed item under a model point on the plan's storey: the last placed, when items overlap.
     func placementHit(_ point: Point2) -> PlacementID? {
-        for placement in document.placements.reversed() where placement.storeyID == groundStorey {
+        for placement in document.placements.reversed() where placement.storeyID == planStorey {
             let item = Furniture.item(placement.catalogItemID) ?? Furniture.placeholder(placement.catalogItemID)
             let turn = Double(placement.rotation.microDegrees) / 1_000_000 * .pi / 180
             let outline = item.outline(cx: HouseScene.feet(placement.position.x),
@@ -179,11 +179,11 @@ extension HestiaModel {
         return nil
     }
 
-    /// The ground-storey wall nearest a model point, when the point is within half its thickness plus `slack`
+    /// The plan storey's wall nearest a model point, when the point is within half its thickness plus `slack`
     /// ticks of its centerline.
     func wallNear(_ point: Point2, slack: Double) -> WallID? {
         var best: (id: WallID, distance: Double)?
-        for wall in document.walls where wall.storeyID == groundStorey {
+        for wall in document.walls where wall.storeyID == planStorey {
             let distance = PlanGeometry.distance(from: point, toSegment: wall.start, wall.end)
             guard distance <= Double(wall.thickness.ticks) / 2 + slack else { continue }
             if best == nil || distance < best!.distance { best = (wall.id, distance) }

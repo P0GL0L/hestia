@@ -20,6 +20,14 @@ struct HelpGuideTests {
         #expect(Set(titles).count == titles.count)
         #expect(HelpGuide.topics.allSatisfy { !$0.lines.isEmpty })
     }
+
+    @Test("Export help says DXF writes the floor currently shown")
+    func selectedFloorDXF() throws {
+        let topic = try #require(HelpGuide.topics.first { $0.title == "Export drawings and models" })
+        let text = topic.lines.joined(separator: " ")
+        #expect(text.contains("shown floor plan (DXF)"))
+        #expect(!text.contains("ground plan (DXF)"))
+    }
 }
 
 @Suite("Export sheet sizes")

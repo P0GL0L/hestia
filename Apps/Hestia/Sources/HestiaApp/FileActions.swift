@@ -123,6 +123,34 @@ extension ContentView {
         }
     }
 
+    /// Shows another storey's plan to draw on; the view stays put, so the floors line up as you switch.
+    func showStorey(_ storey: StoreyID?) {
+        guard var current = session, let storey else { return }
+        clearDrawing()
+        do {
+            try current.show(storey: storey)
+            session = current
+            selection = nil
+            status = "Showing the \(current.model.planStoreyName) plan."
+        } catch {
+            status = HestiaModel.describe(error)
+        }
+    }
+
+    /// Adds a storey on top of the building and shows it, with the floor below drawn faint to build on.
+    func addStoreyAbove() {
+        guard var current = session else { return }
+        clearDrawing()
+        do {
+            try current.addStoreyAbove()
+            session = current
+            selection = nil
+            status = "Added the \(current.model.planStoreyName). The floor below shows faint; walls snap to it."
+        } catch {
+            status = HestiaModel.describe(error)
+        }
+    }
+
     func redo() {
         guard var current = session else { return }
         clearDrawing()
@@ -153,13 +181,13 @@ extension ContentView {
         }
     }
 
-    /// Removes the ground storey's roof when it has one; otherwise puts a hip roof over the ground walls, when
+    /// Removes the plan storey's roof when it has one; otherwise puts a hip roof over that storey's walls, when
     /// they close one rectangle.
     func toggleRoof() {
         guard var current = session else { return }
         clearDrawing()
         do {
-            if current.model.groundRoof != nil {
+            if current.model.planRoof != nil {
                 try current.removeRoof()
                 session = current
                 status = "Removed the roof. Undo puts it back."
@@ -195,7 +223,7 @@ extension ContentView {
     }
 
     func exportDXF(_ model: HestiaModel) {
-        writeExport(name: fileName(model, "-ground-plan.dxf")) {
+        writeExport(name: fileName(model, model.planFileSuffix)) {
             try model.dxf()
         }
     }

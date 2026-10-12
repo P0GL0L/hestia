@@ -32,8 +32,8 @@ struct PlanOverlay: Equatable {
     static let ink = (red: 0.25, green: 0.25, blue: 0.27)
     static let accent = (red: 0.95, green: 0.45, blue: 0.05)
 
-    /// Terrain under the plan and furniture over it, for one storey. The selected placement is outlined in the
-    /// accent color.
+    /// Terrain under the plan and furniture over it, for one storey, and under an upper storey the walls of the
+    /// storey below, faint, to build on. The selected placement is outlined in the accent color.
     init(document: ModelDocument, storey: StoreyID?, selected: PlacementID? = nil) {
         let patches = document.terrainPatches.sorted {
             SiteKind(patchName: $0.name).order < SiteKind(patchName: $1.name).order
@@ -49,6 +49,15 @@ struct PlanOverlay: Equatable {
             }
             if let middle = Self.middle(patch.boundary) {
                 labels.append(Label(position: middle, text: patch.name, size: 10))
+            }
+        }
+        if let shown = document.storeys.first(where: { $0.id == storey }),
+           let below = HestiaModel.storey(below: shown, in: document) {
+            for wall in document.walls where wall.storeyID == below.id {
+                guard let outline = Self.outline(wall) else { continue }
+                under.append(Shape(points: outline, closed: true, paint: .fill(.concrete, opacity: 0.3)))
+                under.append(Shape(points: outline, closed: true,
+                                   paint: .stroke(red: 0.6, green: 0.6, blue: 0.64, width: 1, dashed: true)))
             }
         }
         for placement in document.placements where placement.storeyID == storey {
@@ -92,6 +101,21 @@ struct PlanOverlay: Equatable {
                             paint: .stroke(red: line.red, green: line.green, blue: line.blue, width: width,
                                            dashed: ghost)))
         return shapes
+    }
+
+    /// A wall's outline in plan: its centerline widened by half its thickness each side. Nil for a wall with
+    /// no length.
+    static func outline(_ wall: Wall) -> [Point2]? {
+        let dx = Double(wall.end.x.ticks - wall.start.x.ticks), dy = Double(wall.end.y.ticks - wall.start.y.ticks)
+        let length = (dx * dx + dy * dy).squareRoot()
+        guard length > 0 else { return nil }
+        let half = Double(wall.thickness.ticks) / 2
+        let (nx, ny) = (-dy / length * half, dx / length * half)
+        func at(_ point: Point2, _ side: Double) -> Point2 {
+            Point2(x: Length(ticks: point.x.ticks + Int64((side * nx).rounded())),
+                   y: Length(ticks: point.y.ticks + Int64((side * ny).rounded())))
+        }
+        return [at(wall.start, 1), at(wall.end, 1), at(wall.end, -1), at(wall.start, -1)]
     }
 
     /// A rubber-band line from `start` to `end` in the accent color.

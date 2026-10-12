@@ -250,7 +250,7 @@ struct WalkStairsTests {
     func oneStorey() throws {
         var session = EditSession(model: try HestiaModel.blank())
         try session.addWall(from: PlanOverlay.point(0, 0), to: PlanOverlay.point(30, 0))
-        let storey = try #require(session.model.groundStorey)
+        let storey = try #require(session.model.planStorey)
         let house = WalkHouse(document: session.model.document)
         let stopped = walk(Walker(x: 10, y: -4, floor: 0, storey: storey), heading: 0, seconds: 3, in: house)
         #expect(stopped.y < 0)

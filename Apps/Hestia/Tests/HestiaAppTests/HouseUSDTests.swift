@@ -34,7 +34,7 @@ struct HouseUSDTests {
         var session = EditSession(model: try HestiaModel.blank())
         let hostile = "Den\"\n}\ndef Xform \"Evil\" {\t\\\u{01}"
         try session.addRectangleRoom(from: PlanOverlay.point(0, 0), to: PlanOverlay.point(12, 10), named: hostile)
-        let storey = try #require(session.model.groundStorey)
+        let storey = try #require(session.model.planStorey)
         for id in ["hestia.sofa", "unknown \"item\"\nwith\\breaks", ""] {
             let command = AddPlacementCommand(placementID: PlacementID(UUID()), storeyID: storey,
                                               catalogItemID: CatalogItemID(rawValue: id.isEmpty ? " x" : id),
