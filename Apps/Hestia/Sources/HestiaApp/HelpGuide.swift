@@ -64,7 +64,6 @@ enum HelpGuide {
               lines: [
             "Drag to turn the house. The scroll wheel zooms in and out; on a trackpad, pinch.",
             "The + and − buttons, or Command-= and Command-−, zoom too.",
-            "Hold Option while scrolling to tilt the view instead of zooming.",
             "Turn off Roof to look down into the rooms.",
         ]),
         Topic(title: "Walk inside", keywords: ["walk", "inside", "wasd", "first person", "keys"], lines: [

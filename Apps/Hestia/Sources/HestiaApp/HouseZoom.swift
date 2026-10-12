@@ -17,10 +17,6 @@ enum HouseZoom {
 
     /// How much one zoom step or wheel notch moves the orbiting camera toward its target.
     static let step = 0.8
-    /// How many + or − presses the view keeps count of either way: beyond the camera's 3 to 3,000 ft reach
-    /// they would do nothing anyway.
-    static let presses = 40
-
     static func wheel(walking: Bool, precise: Bool, option: Bool, deltaY: Double) -> Action {
         if walking { return .ignore }
         if precise || option { return .sceneKit }
@@ -33,8 +29,10 @@ enum HouseZoom {
         walking ? .ignore : .sceneKit
     }
 
-    /// The press count after one more press `by` +1 or −1, kept within `presses` either way.
+    /// The press count after one more press `by` +1 or −1. It is never bounded: the view zooms by the change in
+    /// the count, so every press must change it, whatever the wheel, a pinch, New, or Open did to the camera
+    /// since. A person cannot press often enough to overflow it.
     static func pressed(_ count: Int, by change: Int) -> Int {
-        min(max(count + change, -presses), presses)
+        count + change
     }
 }
