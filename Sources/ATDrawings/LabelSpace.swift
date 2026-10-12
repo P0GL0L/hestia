@@ -28,14 +28,20 @@ struct LabelSpace {
 
     /// How many things a candidate runs into: its text against everything drawn and against its own lines and
     /// other text, and its lines against the text already set. Zero when it is clear. With `within`, a paper
-    /// polygon, text outside it counts too.
+    /// polygon, every text box and candidate stroke must stay inside it.
     ///
     /// With `crossing`, the candidate's own lines longer than 4 mm (less a millimetre at each end, where they
     /// meet what they measure) also may not cross lines already drawn on those layers: a room's dimension line
-    /// is kept off door swings, stairs, and walls.
-    func collisions(_ candidate: [DisplayItem], within: [Point2]? = nil, crossing: Set<String> = []) -> Int {
+    /// is kept off door swings, stairs, and walls. With `strictStrokes`, every candidate stroke must clear every
+    /// line already drawn, without trimming; this is for self-contained marks that do not intentionally meet
+    /// measured geometry.
+    func collisions(_ candidate: [DisplayItem], within: [Point2]? = nil, crossing: Set<String> = [],
+                    strictStrokes: Bool = false) -> Int {
         let own = DrawingAudit.parts(candidate, scale: scale)
         let boxes = own.labels.map { DrawingAudit.inset($0.box, by: -padding) }
+        let boundary = within.map { polygon in
+            (xs: polygon.map { Double($0.x.ticks) }, ys: polygon.map { Double($0.y.ticks) })
+        }
         var count = 0
         for (index, box) in boxes.enumerated() {
             let (x0, x1, y0, y1) = (box.minX, box.maxX, box.minY, box.maxY)
@@ -49,15 +55,22 @@ struct LabelSpace {
             count += labels.filter { $0.maxX > x0 && $0.minX < x1 && $0.maxY > y0 && $0.minY < y1 }
                 .filter { DrawingAudit.overlaps(box, $0) }.count
             count += boxes[(index + 1)...].filter { DrawingAudit.overlaps(box, $0) }.count
-            if let within {
-                let xs = within.map { Double($0.x.ticks) }, ys = within.map { Double($0.y.ticks) }
-                count += box.corners.filter { !RasterOutline.inside($0.x, $0.y, xs, ys) }.count
+            if let boundary {
+                count += box.corners.filter { !RasterOutline.inside($0.x, $0.y, boundary.xs, boundary.ys) }.count
             }
         }
         for stroke in own.strokes {
             for box in labels where DrawingAudit.crosses(stroke.a, stroke.b, box) { count += 1 }
+            if let boundary {
+                count += [stroke.a, stroke.b]
+                    .filter { !RasterOutline.inside($0.x, $0.y, boundary.xs, boundary.ys) }.count
+            }
         }
-        if !crossing.isEmpty {
+        if strictStrokes {
+            for stroke in own.strokes {
+                for other in strokes where Self.intersect(stroke.a, stroke.b, other.a, other.b) { count += 1 }
+            }
+        } else if !crossing.isEmpty {
             let trim = Double(Length.ticksPerMillimeter)
             for stroke in own.strokes {
                 // Ticks and extension lines at the ends sit on what they measure; only the long lines count.
@@ -89,8 +102,9 @@ struct LabelSpace {
     /// The first clear candidate, added to the space; nothing when none is clear. A label that cannot clear the
     /// drawing is left out rather than set over it.
     mutating func place(_ candidates: [[DisplayItem]], within: [Point2]? = nil,
-                        crossing: Set<String> = []) -> [DisplayItem] {
-        for candidate in candidates where collisions(candidate, within: within, crossing: crossing) == 0 {
+                        crossing: Set<String> = [], strictStrokes: Bool = false) -> [DisplayItem] {
+        for candidate in candidates
+            where collisions(candidate, within: within, crossing: crossing, strictStrokes: strictStrokes) == 0 {
             add(candidate)
             return candidate
         }

@@ -19,9 +19,9 @@ private func patterns(sill: Length, height: Length, _ kind: OpeningKind = .windo
 }
 
 @Test func aWindowAboveThePlanCutIsDashed() {
-    // Sill 5', head 7': jambs and glazing all dashed, still on the glazing layer.
+    // Sill 5', head 7': jambs, sills, and glass all dashed, still on the glazing layer.
     let high = patterns(sill: ft(5), height: ft(2))
-    #expect(high.count == 4)
+    #expect(high.count == 6)
     #expect(high.allSatisfy { $0 == .dashed })
     // A sill exactly at the 4' cut counts as above it.
     #expect(patterns(sill: ft(4), height: ft(3)).allSatisfy { $0 == .dashed })
@@ -30,7 +30,7 @@ private func patterns(sill: Length, height: Length, _ kind: OpeningKind = .windo
 @Test func aWindowTheCutCrossesStaysSolid() {
     // Sill 3', head 7'.
     let crossing = patterns(sill: ft(3), height: ft(4))
-    #expect(crossing.count == 4)
+    #expect(crossing.count == 6)
     #expect(crossing.allSatisfy { $0 == .solid })
     // Head exactly at the cut: below it, solid.
     #expect(patterns(sill: ft(1), height: ft(3)).allSatisfy { $0 == .solid })

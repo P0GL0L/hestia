@@ -3,7 +3,9 @@ import Foundation
 
 /// Schematic floor plan: cut walls with hatching, door swings, window symbols, stairs, and room tags with area.
 enum FloorPlanView {
+    /// Cut walls: the house's outside walls heaviest, as blueprints draw them, and inside walls a weight down.
     static let wallStyle = DisplayStyle(layer: "A-WALL", pen: .heavy)
+    static let interiorWallStyle = DisplayStyle(layer: "A-WALL", pen: .medium)
     static let beyondStyle = DisplayStyle(layer: "A-WALL", pen: .thin)
     static let hatchStyle = DisplayStyle(layer: "A-WALL-PATT", pen: .extraFine)
     static let doorStyle = DisplayStyle(layer: "A-DOOR", pen: .thin)
@@ -34,14 +36,16 @@ enum FloorPlanView {
     ) -> [DisplayItem] {
         var items: [DisplayItem] = []
         let hatchSpacing = Length.millimeters(1)
+        let outside = exteriorWalls(document, storey: storey)
         for outline in outlines where outline.kind == .wall {
             let polygon = outline.polygon.map(view.paper)
             if outline.classification == .cut {
                 items.append(DisplayItem(.hatch(boundary: polygon, pattern: .diagonal, spacing: hatchSpacing,
                                                 angle: .degrees(45)), style: hatchStyle, elementID: outline.elementID))
             }
+            let cutStyle = outside.contains(WallID(outline.elementID)) ? wallStyle : interiorWallStyle
             items.append(DisplayItem(.polyline(points: polygon, closed: true),
-                                     style: outline.classification == .cut ? wallStyle : beyondStyle,
+                                     style: outline.classification == .cut ? cutStyle : beyondStyle,
                                      elementID: outline.elementID))
         }
         for outline in outlines where outline.kind == .stair {
@@ -84,6 +88,38 @@ enum FloorPlanView {
         case stackedName
         /// The name turned, in smaller letters.
         case smallTurnedName
+    }
+
+    /// The storey's walls with a face on the outside of the house: walls one of whose sides, just past its
+    /// face, lies outside the storey's outline (its walls and rooms together, holes filled).
+    static func exteriorWalls(_ document: ModelDocument, storey: StoreyID) -> Set<WallID> {
+        let walls = document.walls.filter { $0.storeyID == storey }
+        var shapes = walls.map(SitePlanView.wallOutline)
+        for room in document.rooms where room.storeyID == storey {
+            if let outline = RoomOutline.centerline(of: room, in: document) { shapes.append(outline) }
+        }
+        let outer = RasterOutline.union(shapes, cell: Length.inches(3).ticks)
+            .filter { SitePlanView.signedTwiceArea($0) > 0 }
+            .map { loop in (loop.map { Double($0.x.ticks) }, loop.map { Double($0.y.ticks) }) }
+        func inside(_ x: Double, _ y: Double) -> Bool { outer.contains { RasterOutline.inside(x, y, $0.0, $0.1) } }
+        var result = Set<WallID>()
+        for wall in walls {
+            let (ax, ay) = (Double(wall.start.x.ticks), Double(wall.start.y.ticks))
+            let (bx, by) = (Double(wall.end.x.ticks), Double(wall.end.y.ticks))
+            let length = ((bx - ax) * (bx - ax) + (by - ay) * (by - ay)).squareRoot()
+            guard length > 0 else { continue }
+            let reach = Double(wall.thickness.ticks) / 2 + Double(Length.inches(6).ticks)
+            let (nx, ny) = (-(by - ay) / length * reach, (bx - ax) / length * reach)
+            // Test at a quarter, the middle, and three quarters, so a wall partly outside counts.
+            for share in [0.25, 0.5, 0.75] {
+                let (mx, my) = (ax + (bx - ax) * share, ay + (by - ay) * share)
+                if !inside(mx + nx, my + ny) || !inside(mx - nx, my - ny) {
+                    result.insert(wall.id)
+                    break
+                }
+            }
+        }
+        return result
     }
 
     /// A room's tag: its name, its clear size when it is a box, and its area, centred on the room, ready to be
@@ -229,7 +265,8 @@ enum FloorPlanView {
 
     /// Jambs across the wall, then a swing and leaf for hinged doors, the leaf in its pocket for a pocket door
     /// (a rectangle inside the wall, a quarter of its thickness in from each face), a slide line for other doors,
-    /// and glazing lines for windows, dashed for a window wholly above the plan cut. A cased opening is its two
+    /// and for windows the sills at both faces and a pair of glass lines between, dashed for a window wholly above
+    /// the plan cut. A cased opening is its two
     /// jambs only.
     static func symbol(for opening: Opening, in wall: Wall, view: ViewTransform) -> [DisplayItem] {
         let sx = Double(wall.start.x.ticks), sy = Double(wall.start.y.ticks)
@@ -255,7 +292,9 @@ enum FloorPlanView {
             return items
         }
         if !opening.kind.isDoor {
-            for across in [-half / 3, half / 3] {
+            // As blueprints draw a window: the wall's two faces carried across as the sills, and the glass, a
+            // pair of close lines, in the middle.
+            for across in [-half, -half / 6, half / 6, half] {
                 items.append(DisplayItem(.line(start: at(a, across), end: at(b, across)), style: style, elementID: id))
             }
             return items

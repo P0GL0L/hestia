@@ -92,3 +92,148 @@ private func house(storeys elevations: [Int64], corners: [(Double, Double)], wal
     let line = try #require(SchematicDrawingSet.defaultSectionLine(document))
     #expect(line.start.x == feet(85) && line.end.x == feet(85), "cut at \(line.start.x)")
 }
+
+@Test func aSlopeTheElevationShowsCarriesItsPitch() throws {
+    let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        .deletingLastPathComponent().appendingPathComponent("fixtures/rect-cottage.json")
+    let cottage = try ModelDocument.decode(from: Data(contentsOf: url))
+    let sheets = try SchematicDrawingSet().sheets(for: cottage, geometry: HestiaGeometryEngine())
+    let elevations = try #require(sheets.first { $0.number == "A-201" })
+    let marks = elevations.content.items.filter { $0.style == ElevationView.pitchStyle }
+    let figures: [String] = marks.compactMap { item in
+        guard case let .text(_, string, _, _, _) = item.primitive else { return nil }
+        return string
+    }
+    // The cottage's hip is 6 in 12: each elevation that shows a slope marks it once.
+    #expect(figures.contains("12") && figures.contains("6"))
+    #expect(figures.allSatisfy { $0 == "12" || $0 == "6" })
+    // The triangle's long side runs at the roof's slope.
+    for item in marks {
+        guard case let .polyline(points, true) = item.primitive, points.count == 3 else { continue }
+        let (low, high) = (points[0], points[1])
+        let rise: Double = Double(high.y.ticks - low.y.ticks), run: Double = abs(Double(high.x.ticks - low.x.ticks))
+        #expect(abs(rise / run - 0.5) < 0.01)
+    }
+    #expect(DrawingAudit.findings(elevations).isEmpty)
+}
+
+@Test func pitchFiguresStayInTheirViewsRoom() throws {
+    let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        .deletingLastPathComponent().appendingPathComponent("fixtures/rect-cottage.json")
+    let cottage = try ModelDocument.decode(from: Data(contentsOf: url))
+    let meshes = try HestiaGeometryEngine().meshes(of: cottage)
+    let roofIDs = Set(cottage.roofs.map(\.id.rawValue))
+    let roofMeshes = meshes.filter { mesh in mesh.elementID.map { roofIDs.contains($0) } ?? false }
+    let extent = try #require(ElevationView.meshExtent(cottage, .south, meshes: meshes))
+    let area = PaperRect(minX: 0, minY: 0, width: mmTicks(400), height: mmTicks(200))
+    let view = SchematicDrawingSet.place(extent: extent, in: area, sheetScale: nil, imperial: true).transform
+    func figures(_ room: PaperRect?) -> [Point2] {
+        ElevationView.meshItems(cottage, .south, view: view, meshes: meshes, roofMeshes: roofMeshes, room: room)
+            .filter { $0.style == ElevationView.pitchStyle }
+            .compactMap { item in
+                guard case let .text(position, _, _, _, _) = item.primitive else { return nil }
+                return position
+            }
+    }
+    let free = figures(nil)
+    let lowest = try #require(free.map(\.y.ticks).min())
+    // A room that stops below the figures: the mark that would cross into the view above is left out.
+    let room = PaperRect(minX: 0, minY: 0, width: mmTicks(400), height: lowest - mmTicks(1))
+    let kept = figures(room)
+    #expect(kept.count < free.count)
+    #expect(kept.allSatisfy { $0.y.ticks < room.maxY })
+}
+
+private let pitchProbeScale = DrawingScale(label: "1:1", modelUnitsPerPaperUnit: 1)
+
+private func pitchProbe(_ rises: [Length]) -> (document: ModelDocument, roofID: UUID) {
+    var document = house(storeys: [0], corners: [(0, 0), (30, 0), (30, 20), (0, 20)])
+    let roof = Roof(id: RoofID(UUID()), storeyID: document.storeys[0].id,
+                    footprint: [(0, 0), (30, 0), (30, 20), (0, 20)].map { Point2(x: feet($0.0), y: feet($0.1)) },
+                    eaveHeight: .feet(8),
+                    planes: rises.map { RoofPlane(pitchRisePer12: $0, overhang: .feet(1)) })
+    document.roofs = [roof]
+    return (document, roof.id.rawValue)
+}
+
+private func pitchSegment(_ roofID: UUID, paperLength: Double, rise: Length) -> HiddenLines.Segment {
+    let slope = Double(rise.ticks) / Double(Length.inches(12).ticks)
+    let run = paperLength * Double(Length.ticksPerMillimeter) / hypot(1, slope)
+    return HiddenLines.Segment(start: (h: 0, v: 0), end: (h: run, v: run * slope),
+                               kind: .outline, elementID: roofID)
+}
+
+private func pitchItems(_ document: ModelDocument, _ segments: [HiddenLines.Segment], drawn: [DisplayItem] = [],
+                        within: [Point2]? = nil) -> [DisplayItem] {
+    let view = ViewTransform(scale: pitchProbeScale, modelOrigin: paperPoint(0, 0), paperOrigin: paperPoint(0, 0))
+    return ElevationView.pitchMarks(document, segments: segments, view: view, drawn: drawn, within: within)
+}
+
+@Test func aVisibleSlopeMatchesOnlyItsExactStoredPitch() {
+    let six = Length.inches(6)
+    let sixAndAnEighth = Length(ticks: six.ticks + Length.inches(1).ticks / 8)
+    let probe = pitchProbe([six, sixAndAnEighth])
+    let items = pitchItems(probe.document, [pitchSegment(probe.roofID, paperLength: 40, rise: sixAndAnEighth)])
+    let figures = items.compactMap { item -> String? in
+        guard case let .text(_, string, _, _, _) = item.primitive else { return nil }
+        return string
+    }
+    #expect(items.filter { if case .polyline = $0.primitive { return true } else { return false } }.count == 1)
+    #expect(Set(figures) == ["12", "6.1"])
+}
+
+@Test func aPitchIsMarkedOnceAcrossSeveralVisibleEdges() {
+    let rise = Length.inches(6)
+    let probe = pitchProbe([rise])
+    let first = pitchSegment(probe.roofID, paperLength: 40, rise: rise)
+    var second = pitchSegment(probe.roofID, paperLength: 40, rise: rise)
+    second.start.h += Double(mmTicks(80))
+    second.end.h += Double(mmTicks(80))
+    let items = pitchItems(probe.document, [first, second])
+    #expect(items.filter { if case .polyline = $0.primitive { return true } else { return false } }.count == 1)
+}
+
+@Test func onlyVisibleSlopeEdgesAtLeastFifteenMillimetresCarryAPitch() {
+    let rise = Length.inches(6)
+    let probe = pitchProbe([rise])
+    func count(_ length: Double) -> Int {
+        pitchItems(probe.document, [pitchSegment(probe.roofID, paperLength: length, rise: rise)])
+            .filter { if case .polyline = $0.primitive { return true } else { return false } }.count
+    }
+    #expect(count(14.9) == 0)
+    #expect(count(15.0) == 1)
+    #expect(count(15.1) == 1)
+    var hidden = pitchSegment(probe.roofID, paperLength: 40, rise: rise)
+    hidden.elementID = UUID()
+    #expect(pitchItems(probe.document, [hidden]).isEmpty)
+}
+
+@Test func aPitchMarkWhoseStrokeLeavesTheViewIsOmitted() {
+    let rise = Length.inches(6)
+    let probe = pitchProbe([rise])
+    let segment = HiddenLines.Segment(start: (h: 0, v: 0),
+                                      end: (h: Double(mmTicks(60)), v: Double(mmTicks(30))),
+                                      kind: .outline, elementID: probe.roofID)
+    // The first candidate's text fits from x 15.5–26.5 mm, but its triangle reaches x 27 mm. The other
+    // candidates' figures fall outside this narrow slot, so the complete mark must be omitted.
+    let room = PaperRect(minX: mmTicks(15) + mmTicks(1) / 2, minY: 0,
+                         width: mmTicks(11), height: mmTicks(50))
+    #expect(pitchItems(probe.document, [segment], within: room.corners()).isEmpty)
+}
+
+@Test func aPitchMarkWhoseLegCrossesTheDrawingIsOmitted() {
+    let rise = Length.inches(6)
+    let probe = pitchProbe([rise])
+    let segment = HiddenLines.Segment(start: (h: 0, v: 0),
+                                      end: (h: Double(mmTicks(60)), v: Double(mmTicks(30))),
+                                      kind: .outline, elementID: probe.roofID)
+    let style = DisplayStyle(layer: "A-ROOF", pen: .thin)
+    let blockers = [1.0 / 3, 0.25, 0.5].map { share -> DisplayItem in
+        let lowX = Double(mmTicks(60)) * share
+        let lowY = Double(mmTicks(30)) * share + Double(mmTicks(2))
+        let topY = lowY + Double(mmTicks(7)) * 0.5
+        return DisplayItem(.line(start: paperPoint(Int64(lowX + Double(mmTicks(3))), Int64(topY - 1)),
+                                 end: paperPoint(Int64(lowX + Double(mmTicks(3))), Int64(topY + 1))), style: style)
+    }
+    #expect(pitchItems(probe.document, [segment], drawn: blockers).isEmpty)
+}

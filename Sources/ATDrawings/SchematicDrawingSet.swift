@@ -281,7 +281,7 @@ public struct SchematicDrawingSet: DrawingGenerator {
             let under = paperPoint(placed.transform.paperOrigin.x.ticks,
                                    placed.transform.paperOrigin.y.ticks - mmTicks(10))
             let items = ElevationView.items(document, direction, view: placed.transform, roofMeshes: roofMeshes,
-                                            slabMeshes: slabMeshes, meshes: meshes)
+                                            slabMeshes: slabMeshes, meshes: meshes, room: slot)
                 + SheetFrame.viewTitle(name, scale: scale, at: placed.fits ? under : titleAt)
             return ViewDrawing(items: items, scale: scale)
         case let .schedule(kind):
