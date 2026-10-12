@@ -173,6 +173,12 @@ struct ContentView: View {
                 .opacity(0)
                 .frame(width: 0, height: 0)
                 .accessibilityHidden(true)
+            // Command-D copies the selection beside itself, as plan apps do.
+            Button("Duplicate") { duplicateSelection() }
+                .keyboardShortcut("d", modifiers: .command)
+                .opacity(0)
+                .frame(width: 0, height: 0)
+                .accessibilityHidden(true)
         }
         .sheet(isPresented: $showHelp) {
             HelpView { showHelp = false }

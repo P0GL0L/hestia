@@ -44,6 +44,8 @@ extension ContentView {
                             PropertyRow(property: row) { text in setProperty(row, to: text, on: selection) }
                                 .id(row.label + row.value)
                         }
+                        Button("Duplicate", systemImage: "plus.square.on.square") { duplicateSelection() }
+                            .help("Copy it beside itself (Command-D)")
                         Text("Type a new figure and press Return. Undo puts it back.")
                             .font(.caption)
                             .foregroundColor(.secondary)

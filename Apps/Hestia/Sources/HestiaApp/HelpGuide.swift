@@ -61,7 +61,8 @@ enum HelpGuide {
         ]),
         Topic(title: "Select, move, turn, and delete", keywords: ["select", "move", "drag", "delete", "remove",
                                                                  "rotate", "turn", "inspector", "properties",
-                                                                 "size", "width", "rename"], lines: [
+                                                                 "size", "width", "rename", "duplicate",
+                                                                 "copy"], lines: [
             "Choose Select and click a wall, door, window, cased opening, stair, room, item, or site area. Drag it "
                 + "to move it: a door, window, or cased opening slides along its wall, a stair moves whole, and a "
                 + "room stays with its walls.",
@@ -70,7 +71,9 @@ enum HelpGuide {
             "A label field (Plan label, Width label, Schedule width) prints your text on that dimension of the "
                 + "drawings, such as VERIFY or 14'-0\" CLR, instead of the measured figure; empty it to bring the "
                 + "figure back. The model's size does not change.",
-            "R turns a selected item a quarter turn. Delete or Backspace removes what is selected.",
+            "R turns a selected item or stair a quarter turn. Command-D duplicates what is selected beside itself "
+                + "(a door, window, or cased opening further along its wall). Delete or Backspace removes what is "
+                + "selected.",
             "The Delete tool removes whatever you click: a door, window, opening, stair, wall, item, area, or room.",
         ]),
         Topic(title: "Undo, save, and open", keywords: ["undo", "redo", "save", "open", "new", "file"], lines: [
