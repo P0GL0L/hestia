@@ -9,8 +9,9 @@ import Foundation
 /// there are walls, an elevations sheet with all four elevations, each at the largest scale that fits, and a
 /// section at 1/4" = 1'-0" cut south to north through the middle of the walls; and once there is a roof, a roof
 /// plan at 1/4" = 1'-0". With walls the set also opens with a cover sheet (index, notes, and legend), then a
-/// site plan at 1/8" = 1'-0" when the model has terrain, and closes with door and window schedules when it has
-/// doors or windows. These sheets exist only in the drawn set, never in the model.
+/// site plan at 1/8" = 1'-0" when the model has terrain, and closes with schedules: doors and windows when it has
+/// them, an area schedule of its rooms, and a room finish schedule when a room names a finish. These sheets exist
+/// only in the drawn set, never in the model.
 ///
 /// A view that does not fit its sheet at the sheet's scale is drawn at the largest standard scale that does, and
 /// the title block prints the scale the views were actually drawn at, or AS NOTED when they differ.
@@ -222,7 +223,8 @@ public struct SchematicDrawingSet: DrawingGenerator {
         }
         guard !document.walls.isEmpty else { return sheets }
         // A set reads as a set: the cover with its index, notes, and legend first; the site plan next when there
-        // is a site; and the door and window schedules last when there are doors and windows to list.
+        // is a site; and the schedules last: doors and windows when there are any, every room's area, and room
+        // finishes when a room names one.
         var front = [Sheet(id: Self.defaultSheetID(document, tag: 0x01), number: "A-000", title: "Cover",
                            paper: .archD, scale: nil, views: [.cover])]
         if !document.terrainPatches.isEmpty {
@@ -230,9 +232,14 @@ public struct SchematicDrawingSet: DrawingGenerator {
                                paper: .archD, scale: .eighthInch, views: [.sitePlan]))
         }
         var back: [Sheet] = []
+        let finished = document.rooms.contains {
+            $0.floorFinish != nil || $0.wallFinish != nil || $0.ceilingFinish != nil
+        }
         let schedules: [SheetView] = [
             document.openings.contains { $0.kind.isDoor } ? .schedule(kind: .doors) : nil,
             document.openings.contains { $0.kind.isWindow } ? .schedule(kind: .windows) : nil,
+            document.rooms.isEmpty ? nil : .schedule(kind: .areas),
+            finished ? .schedule(kind: .roomFinishes) : nil,
         ].compactMap { $0 }
         if !schedules.isEmpty {
             back.append(Sheet(id: Self.defaultSheetID(document, tag: 0x61), number: "A-601", title: "Schedules",
