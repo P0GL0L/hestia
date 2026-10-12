@@ -28,6 +28,8 @@ struct HouseView: NSViewRepresentable {
     var sessionID: UUID
     var mode: HouseViewMode
     var showRoof: Bool
+    /// Zoom steps from the + and − buttons: each step closer or farther takes a fifth off or puts it back.
+    var zoom: Int
     var walkStart: Walker
     var barriers: WalkBarriers
     var onLeaveWalk: @MainActor () -> Void
@@ -39,6 +41,8 @@ struct HouseView: NSViewRepresentable {
         var shown: HouseScene?
         var sessionID: UUID?
         var mode = HouseViewMode.orbit
+        /// The zoom presses already applied (`HouseZoom.Tracker`): a new coordinator starts with none noted.
+        var zoom = HouseZoom.Tracker()
         let content = SCNNode()
         let orbitCamera = SCNNode()
         let roomLights = SCNNode()
@@ -119,6 +123,11 @@ struct HouseView: NSViewRepresentable {
                 view.allowsCameraControl = true
             }
             coordinator.mode = mode
+        }
+        // A new view, or a new session's camera, takes the count as it stands; only presses since then zoom.
+        let steps = coordinator.zoom.steps(for: zoom, reset: newSession)
+        if steps != 0 {
+            view.zoom(by: pow(HouseSCNView.zoomStep, Double(steps)))
         }
         coordinator.roomLights.isHidden = mode != .walk
         Self.show(coordinator.content, walking: mode == .walk, roof: showRoof)
@@ -280,6 +289,39 @@ final class HouseSCNView: SCNView {
         timer?.invalidate()
         timer = Timer.scheduledTimer(timeInterval: 1.0 / 60.0, target: self, selector: #selector(tick), userInfo: nil,
                                      repeats: true)
+    }
+
+    /// How much one zoom step or wheel notch moves the orbiting camera toward its target.
+    static let zoomStep = HouseZoom.step
+
+    /// Moves the orbiting camera along its line to what it turns around, to `factor` times the distance, never
+    /// closer than 3 feet or farther than 3,000.
+    func zoom(by factor: Double) {
+        guard walker == nil, let camera = pointOfView else { return }
+        let target = defaultCameraController.target
+        let (dx, dy, dz) = (camera.position.x - target.x, camera.position.y - target.y, camera.position.z - target.z)
+        let distance = Double((dx * dx + dy * dy + dz * dz).squareRoot())
+        guard distance > 1e-6 else { return }
+        let scale = CGFloat(min(max(distance * factor, 3), 3000) / distance)
+        camera.position = SCNVector3(target.x + dx * scale, target.y + dy * scale, target.z + dz * scale)
+    }
+
+    /// A mouse wheel zooms the orbiting view; with Option held, and on a trackpad, scrolling keeps SceneKit's
+    /// own handling, and pinching zooms. While walking, no wheel or trackpad input reaches SceneKit (`HouseZoom`).
+    override func scrollWheel(with event: NSEvent) {
+        switch HouseZoom.wheel(walking: walker != nil, precise: event.hasPreciseScrollingDeltas,
+                               option: event.modifierFlags.contains(.option),
+                               deltaY: Double(event.scrollingDeltaY)) {
+        case .ignore: return
+        case let .zoom(factor): zoom(by: factor)
+        case .sceneKit: super.scrollWheel(with: event)
+        }
+    }
+
+    /// A pinch zooms the orbiting view through SceneKit; while walking it is consumed.
+    override func magnify(with event: NSEvent) {
+        guard HouseZoom.pinch(walking: walker != nil) == .sceneKit else { return }
+        super.magnify(with: event)
     }
 
     func stopWalking() {

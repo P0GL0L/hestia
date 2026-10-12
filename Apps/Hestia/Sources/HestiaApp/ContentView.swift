@@ -86,6 +86,9 @@ struct ContentView: View {
     @State var layout = Layout.split
     @State var houseMode = HouseViewMode.orbit
     @State var showRoof = true
+    /// Zoom steps asked of the 3D view by its + and − buttons; the view moves by the change.
+    @State var houseZoom = 0
+    @State var showHelp = false
     /// Whether Blender is rendering a photo.
     @State var rendering = false
     @State var status = Tool.wall.hint
@@ -174,6 +177,9 @@ struct ContentView: View {
         }
         .padding(16)
         .frame(minWidth: 1100, minHeight: 720)
+        .sheet(isPresented: $showHelp) {
+            HelpView { showHelp = false }
+        }
     }
 
     /// File and Undo on the left, export on the right. Each group keeps its ideal width, so no label is cut
@@ -198,6 +204,8 @@ struct ContentView: View {
                 Button("Redo") { redo() }
                     .keyboardShortcut("z", modifiers: [.command, .shift])
                     .disabled(!(session?.canRedo ?? false))
+                Button("Help") { showHelp = true }
+                    .keyboardShortcut("?", modifiers: .command)
             }
             .fixedSize()
             Spacer(minLength: 12)
@@ -307,21 +315,28 @@ struct ContentView: View {
                     houseMode = houseMode == .walk ? .orbit : .walk
                     status = houseMode == .walk
                         ? "Walking. W A S D or the arrows move, drag to look, Shift runs, Esc stops."
-                        : "Orbiting. Drag to turn the house, scroll to zoom."
+                        : "Orbiting. Drag to turn the house; scroll, pinch, or + and \u{2212} to zoom."
                 }
                 .fixedSize()
                 Toggle("Roof", isOn: $showRoof)
                     .fixedSize()
+                // Zoom for the orbiting view; the scroll wheel and a trackpad pinch zoom too.
+                Button("\u{2212}") { houseZoom = HouseZoom.pressed(houseZoom, by: -1) }
+                    .keyboardShortcut("-", modifiers: .command)
+                    .disabled(houseMode == .walk)
+                Button("+") { houseZoom = HouseZoom.pressed(houseZoom, by: 1) }
+                    .keyboardShortcut("=", modifiers: .command)
+                    .disabled(houseMode == .walk)
                 Spacer(minLength: 0)
             }
             ZStack(alignment: .bottom) {
                 HouseView(scene: model.house, document: model.document, meshes: model.meshes, sessionID: sessionID,
-                          mode: houseMode, showRoof: showRoof,
+                          mode: houseMode, showRoof: showRoof, zoom: houseZoom,
                           walkStart: Walker.start(in: model.document, storey: model.groundStorey),
                           barriers: WalkBarriers(document: model.document, storey: model.groundStorey),
                           onLeaveWalk: {
                               houseMode = .orbit
-                              status = "Orbiting. Drag to turn the house, scroll to zoom."
+                              status = "Orbiting. Drag to turn the house; scroll, pinch, or + and \u{2212} to zoom."
                           })
                 if houseMode == .walk {
                     Text("W A S D or arrows to walk · drag to look · Shift to run · Esc to stop")
