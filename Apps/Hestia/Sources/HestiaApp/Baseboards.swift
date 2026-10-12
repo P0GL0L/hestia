@@ -7,6 +7,7 @@ import Foundation
 enum Baseboards {
     static let height = 0.375
     static let thickness = 0.05
+    static let floorLift = 0.02
 
     /// One run of baseboard: from `start`, `length` feet along the unit plan direction `run`, its face toward the
     /// unit plan direction `into` the room, standing on `floor`.
@@ -40,7 +41,7 @@ enum Baseboards {
             guard ring.count >= 3 else { continue }
             let boundary = room.boundaryWallIDs.compactMap { walls[$0] }
             let storey = document.storeys.first { $0.id == room.storeyID }
-            let floor = (storey.map { HouseScene.feet($0.elevation) } ?? 0) + 0.02
+            let floor = (storey.map { HouseScene.feet($0.elevation) } ?? 0) + floorLift
             let sides = ring.indices.map { index in
                 side(from: ring[index], to: ring[(index + 1) % ring.count], walls: boundary)
             }
@@ -51,7 +52,7 @@ enum Baseboards {
                 guard let start = corner(before, side), let end = corner(side, after) else { continue }
                 let length = (end.x - start.x) * side.direction.x + (end.y - start.y) * side.direction.y
                 guard length > 0.05 else { continue }
-                let gaps = side.wall.map { openings(on: $0, document: document, side: side, from: start) } ?? []
+                let gaps = side.walls.flatMap { openings(on: $0, document: document, side: side, from: start) }
                 for (from, to) in pieces(length: length, minus: gaps) {
                     runs.append(Run(start: (start.x + side.direction.x * from, start.y + side.direction.y * from),
                                     run: side.direction, into: side.inward, length: to - from, floor: floor))
@@ -61,13 +62,13 @@ enum Baseboards {
         return runs
     }
 
-    /// A side of a room's centerline outline, with the wall it lies on and the inside face's offset line.
+    /// A side of a room's centerline outline, with every collinear wall segment on it and its inside face line.
     private struct Side {
         var from: (x: Double, y: Double)
         var direction: (x: Double, y: Double)
         var inward: (x: Double, y: Double)
         var offset: Double
-        var wall: Wall?
+        var walls: [Wall]
 
         /// A point on the wall's inside face line.
         var face: (x: Double, y: Double) { (from.x + inward.x * offset, from.y + inward.y * offset) }
@@ -77,12 +78,26 @@ enum Baseboards {
         let (dx, dy) = (b.x - a.x, b.y - a.y)
         let size = max((dx * dx + dy * dy).squareRoot(), 1e-9)
         let direction = (x: dx / size, y: dy / size)
+        let inward = (x: -direction.y, y: direction.x)
         let middle = (x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
-        // The boundary wall this side runs along: parallel to it and through its middle.
-        let wall = walls.min { distance(middle, to: $0) < distance(middle, to: $1) }
+        // RoomOutline removes collinear junctions, so one side may comprise several wall segments. Keep every
+        // segment on this supporting line whose projection overlaps the side, in either drawing direction.
+        let matching = walls.filter { wall in
+            let first = (x: HouseScene.feet(wall.start.x), y: HouseScene.feet(wall.start.y))
+            let second = (x: HouseScene.feet(wall.end.x), y: HouseScene.feet(wall.end.y))
+            let (wx, wy) = (second.x - first.x, second.y - first.y)
+            let wallSize = (wx * wx + wy * wy).squareRoot()
+            guard wallSize > 1e-9 else { return false }
+            let parallel = abs(wx * direction.y - wy * direction.x) / wallSize < 1e-6
+            let fromLine = abs((first.x - a.x) * inward.x + (first.y - a.y) * inward.y)
+            let p0 = (first.x - a.x) * direction.x + (first.y - a.y) * direction.y
+            let p1 = (second.x - a.x) * direction.x + (second.y - a.y) * direction.y
+            return parallel && fromLine < 0.05 && max(p0, p1) > -0.05 && min(p0, p1) < size + 0.05
+        }
+        let wall = matching.min { distance(middle, to: $0) < distance(middle, to: $1) }
             .flatMap { distance(middle, to: $0) < 0.05 ? $0 : nil }
         let offset = wall.map { HouseScene.feet($0.thickness) / 2 } ?? 0.25
-        return Side(from: a, direction: direction, inward: (-direction.y, direction.x), offset: offset, wall: wall)
+        return Side(from: a, direction: direction, inward: inward, offset: offset, walls: matching)
     }
 
     private static func distance(_ point: (x: Double, y: Double), to wall: Wall) -> Double {
@@ -104,8 +119,8 @@ enum Baseboards {
         return (p.x + first.direction.x * t, p.y + first.direction.y * t)
     }
 
-    /// Stretches of a side, measured from its start, covered by a door, cased opening, or floor-length window
-    /// on its wall, widened by the casing the baseboard stops against.
+    /// Stretches of a side, measured from its start, covered by a door, cased opening, or a window whose casing
+    /// reaches the board, widened by the casing the baseboard stops against.
     private static func openings(on wall: Wall, document: ModelDocument, side: Side,
                                  from start: (x: Double, y: Double)) -> [(Double, Double)] {
         let a = (x: HouseScene.feet(wall.start.x), y: HouseScene.feet(wall.start.y))
@@ -118,7 +133,7 @@ enum Baseboards {
         }
         return document.openings.filter { opening in
             let reachesFloor = opening.kind.isDoor || opening.kind == .casedOpening
-                || HouseScene.feet(opening.sillHeight) < height
+                || HouseScene.feet(opening.sillHeight) - OpeningDetail.casing < floorLift + height
             return opening.wallID == wall.id && reachesFloor
         }.map { opening in
             let offset = HouseScene.feet(opening.offsetAlongWall)

@@ -151,6 +151,65 @@ struct MoldingTests {
         #expect(abs(covered - (20 - thickness - gap)) < 0.01)
     }
 
+    @Test("A split collinear wall stops its board at an opening on a later segment")
+    func splitWallOpeningGap() throws {
+        var session = EditSession(model: try HestiaModel.blank())
+        try session.addRectangleRoom(from: PlanOverlay.point(0, 0), to: PlanOverlay.point(20, 15), named: "Living")
+        var document = session.model.document
+        let southIndex = try #require(document.walls.firstIndex {
+            abs(HouseScene.feet($0.start.y)) < 0.01 && abs(HouseScene.feet($0.end.y)) < 0.01
+        })
+        let original = document.walls.remove(at: southIndex)
+        var first = original
+        first.id = WallID(UUID())
+        first.start = PlanOverlay.point(0, 0)
+        first.end = PlanOverlay.point(10, 0)
+        var second = original
+        second.id = WallID(UUID())
+        second.start = PlanOverlay.point(20, 0)
+        second.end = PlanOverlay.point(10, 0)
+        document.walls += [first, second]
+        let roomIndex = try #require(document.rooms.firstIndex { $0.boundaryWallIDs.contains(original.id) })
+        let boundaryIndex = try #require(document.rooms[roomIndex].boundaryWallIDs.firstIndex(of: original.id))
+        document.rooms[roomIndex].boundaryWallIDs.replaceSubrange(boundaryIndex...boundaryIndex,
+                                                                  with: [first.id, second.id])
+        document.openings = [
+            Opening(id: OpeningID(UUID()), wallID: second.id, offsetAlongWall: length(5), width: length(3),
+                    height: length(7), sillHeight: length(0), kind: .casedOpening),
+        ]
+
+        let runs = Baseboards.runs(document).filter { abs($0.run.y) < 1e-6 && $0.start.y < 1 }
+            .sorted { $0.start.x < $1.start.x }
+        #expect(runs.count == 2)
+        let gapStart = 12 - OpeningDetail.casing
+        let gapEnd = 15 + OpeningDetail.casing
+        if runs.count == 2 {
+            #expect(abs(runs[0].start.x + runs[0].run.x * runs[0].length - gapStart) < 0.01)
+            #expect(abs(runs[1].start.x - gapEnd) < 0.01)
+        }
+    }
+
+    @Test("Window casing interrupts a board exactly while their heights overlap")
+    func windowCasingGap() throws {
+        var session = EditSession(model: try HestiaModel.blank())
+        try session.addRectangleRoom(from: PlanOverlay.point(0, 0), to: PlanOverlay.point(20, 15), named: "Living")
+        var document = session.model.document
+        let south = try #require(document.walls.first {
+            abs(HouseScene.feet($0.start.y)) < 0.01 && abs(HouseScene.feet($0.end.y)) < 0.01
+        })
+        let firstClearSill = Baseboards.floorLift + Baseboards.height + OpeningDetail.casing
+        document.openings = [
+            Opening(id: OpeningID(UUID()), wallID: south.id, offsetAlongWall: length(8), width: length(4),
+                    height: length(4), sillHeight: length(firstClearSill - 0.02), kind: .window),
+        ]
+        let colliding = Baseboards.runs(document).filter { abs($0.run.y) < 1e-6 && $0.start.y < 1 }
+        #expect(colliding.count == 2)
+
+        document.openings[0].sillHeight = length(firstClearSill + 0.02)
+        let clear = Baseboards.runs(document).filter { abs($0.run.y) < 1e-6 && $0.start.y < 1 }
+        #expect(clear.count == 1)
+    }
+
     @Test("Gaps come out of a run, leaving no slivers")
     func gaps() {
         let pieces = Baseboards.pieces(length: 10, minus: [(2, 4), (3.98, 6), (9.97, 11)])
