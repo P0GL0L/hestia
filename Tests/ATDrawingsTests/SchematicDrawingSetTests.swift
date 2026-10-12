@@ -160,7 +160,9 @@ private func sheet(_ number: String, _ sheets: [SheetDrawing]) throws -> SheetDr
     let view = ViewTransform(scale: .oneTo50, modelOrigin: wall.start, paperOrigin: wall.start)
     let window = Opening(id: OpeningID(UUID()), wallID: wall.id, offsetAlongWall: .millimeters(500),
                          width: .millimeters(1200), height: .millimeters(1200), sillHeight: .millimeters(900))
-    #expect(FloorPlanView.symbol(for: window, in: wall, view: view).map(\.style.layer) == Array(repeating: "A-GLAZ", count: 4))
+    // Two jambs, the two sills, and the pair of glass lines.
+    let windowLayers: [String] = FloorPlanView.symbol(for: window, in: wall, view: view).map(\.style.layer)
+    #expect(windowLayers == Array(repeating: "A-GLAZ", count: 6))
     let slider = Opening(id: OpeningID(UUID()), wallID: wall.id, offsetAlongWall: .millimeters(2000),
                          width: .millimeters(1800), height: .millimeters(2100), sillHeight: .millimeters(0), kind: .slidingDoor)
     let items = FloorPlanView.symbol(for: slider, in: wall, view: view)

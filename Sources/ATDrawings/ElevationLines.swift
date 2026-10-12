@@ -121,8 +121,9 @@ extension ElevationView {
 
     /// An elevation drawn from the meshes: hidden-line edges, the ground line at grade, and level marks that
     /// do not crowd one another. It needs no wall square to the view, so a house set at an angle has one too.
+    /// With `room`, the view's area on the sheet, pitch figures stay inside it, clear of the views around it.
     static func meshItems(_ document: ModelDocument, _ direction: ElevationDirection, view: ViewTransform,
-                          meshes: [Mesh], roofMeshes: [Mesh]) -> [DisplayItem] {
+                          meshes: [Mesh], roofMeshes: [Mesh], room: PaperRect? = nil) -> [DisplayItem] {
         guard let extent = meshExtent(document, direction, meshes: meshes) else { return [] }
         let grade = grade(document)
         let openings = Set(document.openings.map(\.id.rawValue))
@@ -144,7 +145,86 @@ extension ElevationView {
                                            string: label, height: .millimeters(2), rotation: .degrees(0),
                                            alignment: .left), style: levelStyle))
         }
+        return items + pitchMarks(document, segments: segments, view: view, drawn: items, within: room?.corners())
+    }
+
+    static let pitchStyle = DisplayStyle(layer: "A-ELEV-ANNO", pen: .fine)
+
+    /// A pitch triangle on each pitched roof's drawn slope, as elevations mark them: a small right triangle just
+    /// above a sloped roof line this view actually shows, its long side parallel to it, "12" over its level leg
+    /// and the rise beside its upright one. The line must be one of the roof's visible edges and run at one of
+    /// its planes' pitches; the triangle goes a third, a quarter, or half the way along it where it clears the
+    /// drawing (`LabelSpace`) and its figures stay `within` the given paper polygon, and each roof is marked
+    /// once per pitch.
+    static func pitchMarks(_ document: ModelDocument, segments: [HiddenLines.Segment], view: ViewTransform,
+                           drawn: [DisplayItem], within: [Point2]? = nil) -> [DisplayItem] {
+        var space = LabelSpace(drawn, scale: view.scale)
+        var items: [DisplayItem] = []
+        let twelve = Double(Length.inches(12).ticks)
+        for roof in document.roofs {
+            let rises = Set(roof.planes.compactMap(\.pitchRisePer12).filter { $0.ticks > 0 })
+                .sorted(by: { $0.ticks < $1.ticks })
+            /// Hidden-line clipping can leave fractional endpoints on the same source edge. Convert that edge's
+            /// slope back to rise per 12 and allow only one drawing tick of numerical/mesh rounding, then assign
+            /// it to the nearest stored pitch so nearby distinct pitches can never claim the same visible edge.
+            func matchedRise(_ segment: HiddenLines.Segment) -> Length? {
+                let run = abs(segment.end.h - segment.start.h)
+                guard run > 0 else { return nil }
+                let actual = abs(segment.end.v - segment.start.v) / run * twelve
+                guard let nearest = rises.min(by: {
+                    abs(Double($0.ticks) - actual) < abs(Double($1.ticks) - actual)
+                }), abs(Double(nearest.ticks) - actual) <= 1 else { return nil }
+                return nearest
+            }
+            for rise in rises {
+                let slope = Double(rise.ticks) / twelve
+                var candidates: [[DisplayItem]] = []
+                for segment in segments where segment.elementID == roof.id.rawValue && matchedRise(segment) == rise {
+                    let (a, b) = segment.start.h <= segment.end.h ? (segment.start, segment.end)
+                        : (segment.end, segment.start)
+                    let run = b.h - a.h
+                    guard run > 0 else { continue }
+                    let low = b.v >= a.v ? a : b, high = b.v >= a.v ? b : a
+                    let paperLength = Double(view.paper(Length(ticks: Int64(hypot(run, b.v - a.v)))).ticks)
+                    guard paperLength >= Double(mmTicks(15)) else { continue }
+                    let uphill: Double = high.h > low.h ? 1 : -1
+                    for share in [1.0 / 3, 0.25, 0.5] {
+                        let h = low.h + (high.h - low.h) * share, v = low.v + (high.v - low.v) * share
+                        candidates.append(pitchTriangle(at: view.paper(paperPoint(Int64(h.rounded()),
+                                                                                     Int64(v.rounded()))),
+                                                        uphill: uphill, slope: slope, rise: rise,
+                                                        elementID: roof.id.rawValue))
+                    }
+                }
+                items += space.place(candidates, within: within, strictStrokes: true)
+            }
+        }
         return items
+    }
+
+    /// The triangle and its two figures, standing 2 mm above the roof line at `point`: its long side runs
+    /// uphill (`uphill` 1 to the right, -1 to the left) at the roof's `slope`, its level leg across the top
+    /// with "12" over it, and its upright leg at the downhill end with the rise beside it.
+    static func pitchTriangle(at point: Point2, uphill: Double, slope: Double, rise: Length, elementID: UUID)
+        -> [DisplayItem] {
+        let leg = Double(mmTicks(7))
+        let low = (x: Double(point.x.ticks), y: Double(point.y.ticks) + Double(mmTicks(2)))
+        let high = (x: low.x + uphill * leg, y: low.y + leg * slope)
+        let corner = (x: low.x, y: high.y)
+        func p(_ x: Double, _ y: Double) -> Point2 { paperPoint(Int64(x.rounded()), Int64(y.rounded())) }
+        let inches = Double(rise.ticks) / Double(Length.inches(1).ticks)
+        let figure = inches == inches.rounded() ? String(Int(inches)) : String(format: "%.1f", inches)
+        let gap = Double(mmTicks(1))
+        return [
+            DisplayItem(.polyline(points: [p(low.x, low.y), p(high.x, high.y), p(corner.x, corner.y)], closed: true),
+                        style: pitchStyle, elementID: elementID),
+            DisplayItem(.text(position: p((low.x + high.x) / 2, high.y + gap), string: "12",
+                              height: .millimeters(2), rotation: .degrees(0), alignment: .center),
+                        style: pitchStyle, elementID: elementID),
+            DisplayItem(.text(position: p(low.x - uphill * gap, (low.y + high.y) / 2 - gap), string: figure,
+                              height: .millimeters(2), rotation: .degrees(0), alignment: uphill > 0 ? .right : .left),
+                        style: pitchStyle, elementID: elementID),
+        ]
     }
 
     /// The height a mark prints: floors exactly, roof heights (found from the roof's slopes) to the nearest
