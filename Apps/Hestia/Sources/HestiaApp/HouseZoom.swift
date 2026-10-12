@@ -35,4 +35,18 @@ enum HouseZoom {
     static func pressed(_ count: Int, by change: Int) -> Int {
         count + change
     }
+
+    /// What the 3D view has already zoomed for. The view zooms by the change in the press count since it last
+    /// looked, but never on its first look or after a reset (a new view, New, or Open): those take the count as
+    /// it is, so no earlier press is ever replayed.
+    struct Tracker: Equatable {
+        private(set) var baseline: Int?
+
+        /// The zoom steps to apply for `count`, and the count noted for next time.
+        mutating func steps(for count: Int, reset: Bool) -> Int {
+            defer { baseline = count }
+            guard let baseline, !reset else { return 0 }
+            return count - baseline
+        }
+    }
 }

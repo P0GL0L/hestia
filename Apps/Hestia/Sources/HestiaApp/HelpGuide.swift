@@ -63,7 +63,7 @@ enum HelpGuide {
         Topic(title: "Look around in 3D", keywords: ["orbit", "zoom", "rotate", "3d", "roof", "camera", "scroll"],
               lines: [
             "Drag to turn the house. The scroll wheel zooms in and out; on a trackpad, pinch.",
-            "The + and − buttons, or Command-= and Command-−, zoom too.",
+            "The + and − buttons, or Command-= and Command-minus, zoom too.",
             "Turn off Roof to look down into the rooms.",
         ]),
         Topic(title: "Walk inside", keywords: ["walk", "inside", "wasd", "first person", "keys"], lines: [

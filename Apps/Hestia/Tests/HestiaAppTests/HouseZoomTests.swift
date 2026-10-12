@@ -48,4 +48,39 @@ struct HouseZoomTests {
         }
         #expect(HouseZoom.pressed(count, by: -1) != count)
     }
+
+    @Test("A 3D view shown again after Plan does not replay earlier presses; the next press is one step")
+    func reshownViewDoesNotReplay() {
+        // Five + presses while the 3D view is up: each applies one step.
+        var count = 0
+        var shown = HouseZoom.Tracker()
+        #expect(shown.steps(for: count, reset: true) == 0)
+        for _ in 0..<5 {
+            count = HouseZoom.pressed(count, by: 1)
+            #expect(shown.steps(for: count, reset: false) == 1)
+        }
+        // Switching to Plan removes the view; switching back makes a new one with a new coordinator.
+        var again = HouseZoom.Tracker()
+        #expect(again.steps(for: count, reset: false) == 0, "no replay of the five earlier presses")
+        count = HouseZoom.pressed(count, by: 1)
+        #expect(again.steps(for: count, reset: false) == 1)
+        count = HouseZoom.pressed(count, by: -1)
+        #expect(again.steps(for: count, reset: false) == -1)
+    }
+
+    @Test("New or Open resets the camera without replaying presses; the next press is one step")
+    func resetDoesNotReplay() {
+        var tracker = HouseZoom.Tracker()
+        var count = 0
+        _ = tracker.steps(for: count, reset: true)
+        count = HouseZoom.pressed(count, by: 1)
+        #expect(tracker.steps(for: count, reset: false) == 1)
+        // Presses made while the view was not looking, then New or Open: the reset takes the count as it is.
+        count += 7
+        #expect(tracker.steps(for: count, reset: true) == 0)
+        count = HouseZoom.pressed(count, by: -1)
+        #expect(tracker.steps(for: count, reset: false) == -1)
+        // An update with no press does nothing.
+        #expect(tracker.steps(for: count, reset: false) == 0)
+    }
 }

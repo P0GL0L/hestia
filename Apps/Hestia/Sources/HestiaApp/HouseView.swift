@@ -41,7 +41,8 @@ struct HouseView: NSViewRepresentable {
         var shown: HouseScene?
         var sessionID: UUID?
         var mode = HouseViewMode.orbit
-        var zoom = 0
+        /// The zoom presses already applied (`HouseZoom.Tracker`): a new coordinator starts with none noted.
+        var zoom = HouseZoom.Tracker()
         let content = SCNNode()
         let orbitCamera = SCNNode()
         let roomLights = SCNNode()
@@ -123,9 +124,10 @@ struct HouseView: NSViewRepresentable {
             }
             coordinator.mode = mode
         }
-        if zoom != coordinator.zoom {
-            view.zoom(by: pow(HouseSCNView.zoomStep, Double(zoom - coordinator.zoom)))
-            coordinator.zoom = zoom
+        // A new view, or a new session's camera, takes the count as it stands; only presses since then zoom.
+        let steps = coordinator.zoom.steps(for: zoom, reset: newSession)
+        if steps != 0 {
+            view.zoom(by: pow(HouseSCNView.zoomStep, Double(steps)))
         }
         coordinator.roomLights.isHidden = mode != .walk
         Self.show(coordinator.content, walking: mode == .walk, roof: showRoof)
