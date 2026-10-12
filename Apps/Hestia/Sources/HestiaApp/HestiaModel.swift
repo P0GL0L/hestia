@@ -611,6 +611,23 @@ struct HestiaModel {
         try SheetPDFExporter().export(.sheets(sheets))
     }
 
+    /// The sheet sizes a drawing set can be exported on, largest first.
+    static let sheetSizes = SchematicDrawingSet.papers
+
+    /// A sheet size as the export menu lists it: ARCH D (36 x 24 in), ISO A3 (420 x 297 mm).
+    static func label(_ paper: PaperSize) -> String {
+        let metric = paper.name.hasPrefix("ISO")
+        let unit = Double(metric ? Length.ticksPerMillimeter : Length.inches(1).ticks)
+        func size(_ length: Length) -> Int { Int((Double(length.ticks) / unit).rounded()) }
+        return "\(paper.name) (\(size(paper.width)) x \(size(paper.height)) \(metric ? "mm" : "in"))"
+    }
+
+    /// The whole set drawn again on `paper`, every sheet on that size, views stepped down to fit.
+    func pdf(on paper: PaperSize) throws -> Data {
+        let set = SchematicDrawingSet(issueDate: issueDate, paper: paper)
+        return try SheetPDFExporter().export(.sheets(set.sheets(for: document, geometry: HestiaGeometryEngine())))
+    }
+
     /// The ground floor plan as ASCII DXF, with the schematic stamp, in the project's units: the plan's walls,
     /// doors and swings, windows, stairs, and room tags, taken back from the sheet into the model so a length in
     /// the file is the length in the model. Hatches have no DXF entity here and are left out by the writer.

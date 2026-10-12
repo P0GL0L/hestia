@@ -186,6 +186,14 @@ extension ContentView {
         }
     }
 
+    /// The drawing set on one sheet size, named for it: rect-cottage-schematic-set-ansi-b.pdf.
+    func exportPDF(_ model: HestiaModel, on paper: PaperSize) {
+        let size = paper.name.lowercased().replacingOccurrences(of: " ", with: "-")
+        writeExport(name: fileName(model, "-schematic-set-\(size).pdf")) {
+            try model.pdf(on: paper)
+        }
+    }
+
     func exportDXF(_ model: HestiaModel) {
         writeExport(name: fileName(model, "-ground-plan.dxf")) {
             try model.dxf()

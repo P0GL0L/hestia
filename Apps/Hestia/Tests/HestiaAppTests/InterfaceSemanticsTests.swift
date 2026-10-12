@@ -1,3 +1,5 @@
+import ATContracts
+import Foundation
 import Testing
 @testable import HestiaApp
 
@@ -13,6 +15,32 @@ struct InterfaceSemanticsTests {
         #expect(ContentView.renderPhotoLabel == "Render Photo")
         #expect(ContentView.exportLabel == "Export")
     }
+
+    #if canImport(SwiftUI)
+    @Test("A selected ANSI B export writes the named full drawing set")
+    @MainActor
+    func selectedPaperExportDelivery() throws {
+        var document = try HestiaModel.blank().document
+        let unique = "Export \(UUID().uuidString)"
+        document.project.name = unique
+        let model = try HestiaModel(document: document, issueDate: "2026-10-12")
+        let slug = unique.lowercased().replacingOccurrences(of: " ", with: "-")
+        let directory = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Hestia-exports", isDirectory: true)
+        let output = directory.appendingPathComponent("\(slug)-schematic-set-ansi-b.pdf")
+        try? FileManager.default.removeItem(at: output)
+        defer { try? FileManager.default.removeItem(at: output) }
+
+        var view = ContentView()
+        view.exportPDF(model, on: .ansiB)
+
+        let data = try Data(contentsOf: output)
+        let text = try #require(String(bytes: data, encoding: .utf8))
+        let mediaBoxes = text.components(separatedBy: "/MediaBox [0 0 1224.000 792.000]").count - 1
+        #expect(mediaBoxes > 0)
+        #expect(!text.contains("/MediaBox [0 0 2592.000 1728.000]"))
+    }
+    #endif
 
     @Test("Roof action names the model mutation")
     func roofActionNames() {

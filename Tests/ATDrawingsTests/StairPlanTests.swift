@@ -33,6 +33,13 @@ private func hasUpLabel(_ items: [DisplayItem]) -> Bool {
     }
 }
 
+private func upLabelPosition(_ items: [DisplayItem]) -> Point2? {
+    items.compactMap { item -> Point2? in
+        guard case let .text(position, string, _, _, _) = item.primitive, string == "UP" else { return nil }
+        return position
+    }.first
+}
+
 @Test func cottagePlanDrawsItsStairWithTreadsAndAnUpArrow() throws {
     let document = try fixture("rect-cottage")
     let stair = try #require(document.stairs.first)
@@ -84,6 +91,30 @@ private func hasUpLabel(_ items: [DisplayItem]) -> Bool {
     #expect(up.y.ticks == bottom.y.ticks - mmTicks(4))
     let east = StairPlan.upLabelPosition(from: bottom, toward: Point2(x: .millimeters(200), y: .millimeters(100)))
     #expect(east.x.ticks == bottom.x.ticks - mmTicks(3))
+}
+
+@Test func upLabelUsesTheFirstClearAlternateAndIsOmittedWhenEveryPlaceIsBlocked() throws {
+    let document = try fixture("rect-cottage")
+    let stair = try #require(document.stairs.first)
+    let outline = try #require(try HestiaGeometryEngine().planView(of: document, storey: stair.storeyID)
+        .first { $0.elementID == stair.id.rawValue })
+    let view = ViewTransform(scale: .quarterInch, modelOrigin: paperPoint(0, 0),
+                             paperOrigin: Point2(x: .millimeters(100), y: .millimeters(100)))
+    let original = StairPlan.items(outline, document: document, view: view)
+    let first = try #require(upLabelPosition(original))
+    let blocker = DisplayItem(.text(position: first, string: "X", height: .millimeters(3), rotation: .degrees(0),
+                                    alignment: .center), style: StairPlan.arrowStyle)
+    let alternate = StairPlan.items(outline, document: document, view: view, drawn: [blocker])
+    let moved = try #require(upLabelPosition(alternate))
+    #expect(moved != first)
+
+    let cover = DisplayItem(.hatch(boundary: [paperPoint(0, 0), paperPoint(mmTicks(300), 0),
+                                              paperPoint(mmTicks(300), mmTicks(300)),
+                                              paperPoint(0, mmTicks(300))],
+                                   pattern: .diagonal, spacing: .millimeters(2), angle: .degrees(45)),
+                            style: StairPlan.arrowStyle)
+    let omitted = StairPlan.items(outline, document: document, view: view, drawn: [cover])
+    #expect(!hasUpLabel(omitted))
 }
 
 @Test func onlyTheNextStoreyUpGetsTheOpening() throws {

@@ -2,11 +2,12 @@ import ATContracts
 import Foundation
 
 /// A stair on its own storey's plan: the engine's outline, a line at every tread nosing, and an UP arrow
-/// along the run from the bottom riser toward the top.
+/// along the run from the bottom riser toward the top, labelled UP where the label clears what is drawn.
 enum StairPlan {
     static let arrowStyle = DisplayStyle(layer: "A-FLOR-STRS", pen: .fine)
 
-    static func items(_ outline: ClassifiedOutline, document: ModelDocument, view: ViewTransform) -> [DisplayItem] {
+    static func items(_ outline: ClassifiedOutline, document: ModelDocument, view: ViewTransform,
+                      drawn: [DisplayItem] = []) -> [DisplayItem] {
         let id = outline.elementID
         var items = [DisplayItem(.polyline(points: outline.polygon.map(view.paper), closed: true),
                                  style: FloorPlanView.stairStyle, elementID: id)]
@@ -38,10 +39,23 @@ enum StairPlan {
                                  elementID: id))
         items.append(DisplayItem(.line(start: at(head - barb, barb / 2), end: at(head, 0)), style: arrowStyle,
                                  elementID: id))
-        items.append(DisplayItem(.text(position: upLabelPosition(from: at(0, 0), toward: at(length, 0)),
-                                       string: "UP", height: .millimeters(2), rotation: .degrees(0),
-                                       alignment: .center),
-                                 style: arrowStyle, elementID: id))
+        // UP beyond the bottom riser; where walls or other drawing are in the way there, beside the bottom
+        // of the run or beyond its top; with no clear place, the arrow alone says which way is up.
+        let side = Double(mmTicks(4)) * Double(view.scale.modelUnitsPerPaperUnit)
+        let places = [
+            upLabelPosition(from: at(0, 0), toward: at(length, 0)),
+            upLabelPosition(from: at(0, -half - side), toward: at(length, -half - side)),
+            upLabelPosition(from: at(0, half + side), toward: at(length, half + side)),
+            upLabelPosition(from: at(length, 0), toward: at(0, 0)),
+        ]
+        let space = LabelSpace(drawn + items, scale: view.scale)
+        let candidates = places.map { place in
+            [DisplayItem(.text(position: place, string: "UP", height: .millimeters(2), rotation: .degrees(0),
+                               alignment: .center), style: arrowStyle, elementID: id)]
+        }
+        if let clear = candidates.first(where: { space.collisions($0) == 0 }) {
+            items += clear
+        }
         return items
     }
 

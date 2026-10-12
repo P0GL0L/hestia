@@ -4,7 +4,8 @@ import Foundation
 /// Builds the schematic drawing set: one paper-space sheet per `Sheet` in the model, each with the border,
 /// title block, and boxed SCHEMATIC / NOT FOR CONSTRUCTION stamp. Output is not a permit set.
 ///
-/// When the model has no sheets, it draws one floor plan sheet per storey on ARCH D at 1/4" = 1'-0"; once
+/// Every sheet is drawn on `paper` when one is chosen (ARCH D, ISO A1, ARCH C, ISO A3, or ANSI B). When the model
+/// has no sheets, it draws one floor plan sheet per storey, on ARCH D unless a paper is chosen, at 1/4" = 1'-0"; once
 /// there are walls, an elevations sheet with all four elevations, each at the largest scale that fits, and a
 /// section at 1/4" = 1'-0" cut south to north through the middle of the walls; and once there is a roof, a roof
 /// plan at 1/4" = 1'-0". With walls the set also opens with a cover sheet (index, notes, and legend), then a
@@ -16,13 +17,183 @@ import Foundation
 public struct SchematicDrawingSet: DrawingGenerator {
     /// Printed in the title block's date field, such as `2026-10-06`. Nil prints a dash.
     public var issueDate: String?
+    /// The sheet size every sheet is drawn on, the model's own sheets included; nil keeps each stored sheet's
+    /// paper and draws the sheets the set adds on ARCH D. Views step down to a scale that fits a smaller sheet.
+    public var paper: PaperSize?
+    /// The sheets a cover lists; nil lists the sheets the set would draw. Set once continuation pages are known.
+    var index: [Sheet]?
 
-    public init(issueDate: String? = nil) {
+    public init(issueDate: String? = nil, paper: PaperSize? = nil) {
         self.issueDate = issueDate
+        self.paper = paper
     }
 
+    /// The sheet sizes a set can be drawn on, largest first.
+    public static let papers: [PaperSize] = [.archD, .isoA1, .archC, .isoA3, .ansiB]
+
     public func sheets(for document: ModelDocument, geometry: any GeometryEngine) throws -> [SheetDrawing] {
-        try sheetsToDraw(document).map { try draw($0, document: document, geometry: geometry) }
+        let all = sheetsToDraw(document)
+        var used = Set(all.map(\.number))
+        var drawings: [SheetDrawing] = []
+        var listed: [Sheet] = []
+        for var sheet in all {
+            if let paper { sheet.paper = paper }
+            if let pages = try schedulePages(sheet, document: document, geometry: geometry, used: &used) {
+                drawings += pages
+                listed += pages.map { page in
+                    Sheet(id: sheet.id, number: page.number, title: page.title, paper: page.paper,
+                          scale: page.scale, views: sheet.views)
+                }
+            } else {
+                drawings.append(try draw(sheet, document: document, geometry: geometry))
+                listed.append(sheet)
+            }
+        }
+
+        // A cover index is finite paper too. Keep its notes and legend on the first cover, then continue a long
+        // index on readable cover pages rather than shrinking columns until their titles overlap.
+        guard let coverAt = listed.firstIndex(where: { $0.views.contains(.cover) }),
+              let drawingAt = drawings.firstIndex(where: { $0.number == listed[coverAt].number }) else {
+            return drawings
+        }
+        let cover = listed[coverAt]
+        let area = SheetFrame.drawingArea(for: cover.paper)
+        let room = Self.slots(in: area, count: 1).first ?? area
+        let firstCapacity = CoverSheet.indexCapacity(in: room, continued: false)
+        let continuedCapacity = CoverSheet.indexCapacity(in: room, continued: true)
+        var continuationCount = 0
+        while true {
+            let remaining = max(0, listed.count + continuationCount - firstCapacity)
+            let needed = (remaining + continuedCapacity - 1) / continuedCapacity
+            if needed == continuationCount { break }
+            continuationCount = needed
+        }
+
+        var continuationSheets: [Sheet] = []
+        for position in 0..<continuationCount {
+            let number = Self.nextNumber(after: cover.number, used: &used)
+            continuationSheets.append(Sheet(id: Self.coverContinuationSheetID(document, position: position),
+                                            number: number, title: "Cover (continued)", paper: cover.paper,
+                                            scale: nil, views: [.cover]))
+        }
+        var finalIndex = listed
+        finalIndex.insert(contentsOf: continuationSheets, at: coverAt + 1)
+
+        var coverDrawings = [coverPage(cover, index: Array(finalIndex.prefix(firstCapacity)), continued: false,
+                                      document: document)]
+        var rest = finalIndex.dropFirst(firstCapacity)
+        for sheet in continuationSheets {
+            let page = Array(rest.prefix(continuedCapacity))
+            rest = rest.dropFirst(page.count)
+            coverDrawings.append(coverPage(sheet, index: page, continued: true, document: document))
+        }
+        drawings.replaceSubrange(drawingAt...drawingAt, with: coverDrawings)
+        return drawings
+    }
+
+    /// One cover or cover-continuation page. The first page owns notes and the legend; later pages use the full
+    /// drawing room for a readable two-column continuation of the sheet index.
+    private func coverPage(_ sheet: Sheet, index: [Sheet], continued: Bool,
+                           document: ModelDocument) -> SheetDrawing {
+        let area = SheetFrame.drawingArea(for: sheet.paper)
+        let room = Self.slots(in: area, count: 1).first ?? area
+        let frame = SheetFrame.items(number: sheet.number, title: sheet.title, scale: nil, paper: sheet.paper,
+                                     projectName: document.project.name, issueDate: issueDate)
+        let content = CoverSheet.items(project: document.project.name, index: index, in: room,
+                                       continued: continued)
+        return SheetDrawing(number: sheet.number, title: sheet.title, paper: sheet.paper, scale: nil,
+                            content: DisplayList(items: frame + content))
+    }
+
+    /// A schedules sheet whose tables do not all fit their places on it, drawn instead as one or more pages:
+    /// each table follows the last down the page and runs on to the next page when it fills one, every row
+    /// drawn and none left out. Pages after the first take the next free sheet number and say "(continued)".
+    /// Nil when the sheet is not all schedules or everything fits, so it is drawn as usual.
+    func schedulePages(_ sheet: Sheet, document: ModelDocument, geometry: any GeometryEngine,
+                       used: inout Set<String>) throws -> [SheetDrawing]? {
+        guard !sheet.views.isEmpty else { return nil }
+        var kinds: [ScheduleKind] = []
+        for view in sheet.views {
+            guard case let .schedule(kind) = view else { return nil }
+            kinds.append(kind)
+        }
+        let units = self.units(document)
+        var areas: [RoomID: Area] = [:]
+        if kinds.contains(.areas) {
+            let walked = RoomWalk.walked(document)
+            for storey in document.storeys {
+                areas.merge(try geometry.roomAreas(of: walked, storey: storey.id)) { first, _ in first }
+            }
+        }
+        let tables = kinds.compactMap { ScheduleView.table($0, document: document, style: units, areas: areas) }
+        let area = SheetFrame.drawingArea(for: sheet.paper)
+        let slots = Self.slots(in: area, count: sheet.views.count)
+        let fit = zip(tables, slots).allSatisfy { table, slot in
+            ScheduleView.capacity(table, height: slot.height - mmTicks(8), width: slot.width) >= table.rows.count
+        }
+        guard tables.count == kinds.count, !fit else { return nil }
+        var pages: [[DisplayItem]] = [[]]
+        let first = area.maxY - mmTicks(8)
+        var top = first
+        for table in tables {
+            var rows = table.rows[...]
+            var continued = false
+            while !rows.isEmpty {
+                let room = top - area.minY
+                var part = table
+                part.rows = Array(rows)
+                if continued { part.title += " (continued)" }
+                guard let layout = ScheduleView.layout(part, height: room, width: area.width),
+                      room >= mmTicks(30) else {
+                    if top == first {
+                        // Too wide for any page: say so once.
+                        pages[pages.count - 1] += ScheduleView.items(part, at: paperPoint(area.minX, top),
+                                                                     height: room, width: area.width)
+                        break
+                    }
+                    pages.append([])
+                    top = first
+                    continue
+                }
+                let take = min(layout.perColumn * layout.columns, rows.count)
+                part.rows = Array(rows.prefix(take))
+                pages[pages.count - 1] += ScheduleView.items(part, at: paperPoint(area.minX, top), height: room,
+                                                             width: area.width)
+                rows = rows.dropFirst(take)
+                continued = true
+                let row = Int64((Double(ScheduleView.rowHeight) * layout.scale).rounded(.down))
+                top -= Int64(min(take, layout.perColumn) + 1) * row + mmTicks(24)
+                if !rows.isEmpty {
+                    pages.append([])
+                    top = first
+                }
+            }
+        }
+        return pages.filter { !$0.isEmpty }.enumerated().map { index, items in
+            var number = sheet.number, title = sheet.title
+            if index > 0 {
+                number = Self.nextNumber(after: sheet.number, used: &used)
+                title += " (continued)"
+            }
+            let frame = SheetFrame.items(number: number, title: title, scale: nil, paper: sheet.paper,
+                                         projectName: document.project.name, issueDate: issueDate)
+            return SheetDrawing(number: number, title: title, paper: sheet.paper, scale: nil,
+                                content: DisplayList(items: frame + items))
+        }
+    }
+
+    /// The next free sheet number after `number` in its series (A-601 → A-602), noted as used.
+    static func nextNumber(after number: String, used: inout Set<String>) -> String {
+        let digits = number.reversed().prefix { $0.isNumber }.reversed()
+        let stem = String(number.dropLast(digits.count))
+        var value = Int(String(digits)) ?? 0
+        var candidate: String
+        repeat {
+            value += 1
+            candidate = stem + String(format: "%0\(max(digits.count, 1))d", value)
+        } while used.contains(candidate)
+        used.insert(candidate)
+        return candidate
     }
 
     func sheetsToDraw(_ document: ModelDocument) -> [Sheet] {
@@ -141,6 +312,23 @@ public struct SchematicDrawingSet: DrawingGenerator {
         return SheetID(UUID(uuid: bytes))
     }
 
+    /// A stable, unique ID for any number of continued cover sheets. Use the full nonnegative `Int` instead of
+    /// squeezing the page into the one-byte tags used by the small fixed set of ordinary generated sheets.
+    static func coverContinuationSheetID(_ document: ModelDocument, position: Int) -> SheetID {
+        let value = UInt64(position)
+        var bytes = document.project.id.rawValue.uuid
+        bytes.7 ^= 0xC7
+        bytes.8 ^= UInt8(truncatingIfNeeded: value >> 56)
+        bytes.9 ^= UInt8(truncatingIfNeeded: value >> 48)
+        bytes.10 ^= UInt8(truncatingIfNeeded: value >> 40)
+        bytes.11 ^= UInt8(truncatingIfNeeded: value >> 32)
+        bytes.12 ^= UInt8(truncatingIfNeeded: value >> 24)
+        bytes.13 ^= UInt8(truncatingIfNeeded: value >> 16)
+        bytes.14 ^= UInt8(truncatingIfNeeded: value >> 8)
+        bytes.15 ^= UInt8(truncatingIfNeeded: value)
+        return SheetID(UUID(uuid: bytes))
+    }
+
     func draw(_ sheet: Sheet, document: ModelDocument, geometry: any GeometryEngine) throws -> SheetDrawing {
         let area = SheetFrame.drawingArea(for: sheet.paper)
         let slots = Self.slots(in: area, count: sheet.views.count)
@@ -215,13 +403,15 @@ public struct SchematicDrawingSet: DrawingGenerator {
         return ViewTransform.centering(modelMin: extent.min, modelMax: extent.max, in: area, scale: scale)
     }
 
-    /// Stacks views top to bottom in equal bands, leaving room under each for its title.
+    /// Stacks views top to bottom in equal bands, leaving room under each for its title and scale (16 mm, the
+    /// most a title set under its view reaches) and a 4 mm gap above, so a view filling its band never touches
+    /// the scale of the view over it.
     static func slots(in area: PaperRect, count: Int) -> [PaperRect] {
         guard count > 0 else { return [] }
         let band = area.height / Int64(count)
         return (0..<count).map { index in
-            PaperRect(minX: area.minX, minY: area.maxY - band * Int64(index + 1) + mmTicks(14), width: area.width,
-                      height: band - mmTicks(14))
+            PaperRect(minX: area.minX, minY: area.maxY - band * Int64(index + 1) + mmTicks(16), width: area.width,
+                      height: band - mmTicks(20))
         }
     }
 
@@ -299,8 +489,8 @@ public struct SchematicDrawingSet: DrawingGenerator {
                                                          height: slot.height - mmTicks(8), width: slot.width),
                                scale: nil)
         case .cover:
-            return ViewDrawing(items: CoverSheet.items(project: document.project.name, index: sheetsToDraw(document),
-                                                       in: slot),
+            let listed = index ?? sheetsToDraw(document)
+            return ViewDrawing(items: CoverSheet.items(project: document.project.name, index: listed, in: slot),
                                scale: nil)
         case .roofPlan:
             guard let extent = RoofPlanView.extent(document) else {
@@ -315,7 +505,7 @@ public struct SchematicDrawingSet: DrawingGenerator {
             let roofMeshes = try geometry.meshes(of: document).filter { mesh in
                 mesh.elementID.map { roofIDs.contains($0) } ?? false
             }
-            let items = RoofPlanView.items(document, view: placed.transform, roofMeshes: roofMeshes)
+            let items = RoofPlanView.items(document, view: placed.transform, roofMeshes: roofMeshes, room: slot)
                 + SheetFrame.viewTitle("Roof Plan", scale: scale, at: placed.fits ? under : titleAt)
             return ViewDrawing(items: items, scale: scale)
         case .sitePlan:

@@ -52,6 +52,40 @@ private func texts(_ items: [DisplayItem]) -> [String] {
     #expect(boxes.outer.0 == boxes.inner.0 - Length.feet(1).ticks)
 }
 
+private func pitchMark(at point: Point2, down: (Double, Double) = (1, 0)) -> [DisplayItem] {
+    [RoofPlanView.label("6:12", at: point)] + RoofPlanView.slopeArrow(at: point, down: down)
+}
+
+private func pitchPosition(_ items: [DisplayItem]) -> Point2? {
+    items.compactMap { item -> Point2? in
+        guard case let .text(position, string, _, _, _) = item.primitive, string == "6:12" else { return nil }
+        return position
+    }.first
+}
+
+@Test func roofPitchMarkUsesAnAlternateWhenItsArrowCrossesRoofLineworkAndOmitsWhenNoneClear() {
+    let blockedAt = Point2(x: .millimeters(50), y: .millimeters(50))
+    let clearAt = Point2(x: .millimeters(70), y: .millimeters(50))
+    let obstacle = DisplayItem(.line(start: Point2(x: .millimeters(50), y: .millimeters(45)),
+                                     end: Point2(x: .millimeters(50), y: .millimeters(47))),
+                               style: RoofPlanView.lineStyle)
+    let room = PaperRect(minX: 0, minY: 0, width: mmTicks(100), height: mmTicks(100))
+    var space = LabelSpace([obstacle], scale: nil)
+    let placed = RoofPlanView.placePitch([pitchMark(at: blockedAt), pitchMark(at: clearAt)],
+                                         in: &space, room: room)
+    #expect(pitchPosition(placed) == clearAt)
+
+    var blocked = LabelSpace([obstacle], scale: nil)
+    #expect(RoofPlanView.placePitch([pitchMark(at: blockedAt)], in: &blocked, room: room).isEmpty)
+}
+
+@Test func roofPitchMarkIsOmittedWhenItsArrowWouldLeaveTheView() {
+    let room = PaperRect(minX: 0, minY: 0, width: mmTicks(100), height: mmTicks(100))
+    let at = Point2(x: .millimeters(50), y: .millimeters(5))
+    var space = LabelSpace([], scale: nil)
+    #expect(RoofPlanView.placePitch([pitchMark(at: at, down: (0, 1))], in: &space, room: room).isEmpty)
+}
+
 @Test func sitePlanShowsLotBuildingAndNorth() throws {
     let document = try cottageWithMoreSheets()
     let sheets = try SchematicDrawingSet().sheets(for: document, geometry: MockGeometryEngine())
