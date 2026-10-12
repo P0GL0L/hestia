@@ -14,7 +14,9 @@ enum HelpGuide {
 
     static let topics: [Topic] = [
         Topic(title: "Views: plan and 3D", keywords: ["layout", "split", "switch", "flip"], lines: [
-            "Plan, Plan + 3D, and 3D at the top right choose what the window shows.",
+            "Plan, Plan + 3D, and 3D in the middle of the toolbar choose what the window shows.",
+            "The tools run down the left edge. The inspector on the right shows the tool's options, what is "
+                + "selected, the 3D view's settings, and the project's counts; the toolbar button hides it.",
             "Draw in the plan, then look at the house in 3D. Every change shows in both at once.",
         ]),
         Topic(title: "Draw walls", keywords: ["wall", "line", "length", "exact", "chain"], lines: [
@@ -37,14 +39,14 @@ enum HelpGuide {
         ]),
         Topic(title: "Furniture and planting", keywords: ["furniture", "sofa", "bed", "tree", "place", "turn",
                                                           "rotate"], lines: [
-            "Choose Furniture, pick an item from the menu by room, and click to place it.",
-            "R, or the Turn button, turns it a quarter turn before you place it.",
+            "Choose Furnish, pick an item in the inspector's menu by room, and click to place it.",
+            "R, or Turn in the inspector, turns it a quarter turn before you place it.",
             "Trees, shrubs, the car, and patio sets are under Outdoor.",
         ]),
         Topic(title: "Landscape and site", keywords: ["site", "lawn", "driveway", "path", "patio", "deck", "pond",
                                                      "garden", "gravel", "lot", "landscape"], lines: [
-            "Choose Site, pick a kind (Lot, Lawn, Driveway, Path, Patio, Deck, Gravel, Pond, Garden bed), and drag "
-                + "out the area. Type a size such as 40 x 20 and press Return for an exact one.",
+            "Choose Site, pick a kind in the inspector (Lot, Lawn, Driveway, Path, Patio, Deck, Gravel, Pond, "
+                + "Garden bed), and drag out the area. Type a size such as 40 x 20 and press Return for an exact one.",
         ]),
         Topic(title: "Select, move, turn, and delete", keywords: ["select", "move", "drag", "delete", "remove",
                                                                  "rotate", "turn"], lines: [
@@ -54,7 +56,8 @@ enum HelpGuide {
         ]),
         Topic(title: "Undo, save, and open", keywords: ["undo", "redo", "save", "open", "new", "file"], lines: [
             "Command-Z undoes and Shift-Command-Z redoes. Command-S saves to the current file.",
-            "New starts an empty plan; Open… and Save… read and write Hestia model files.",
+            "New, Open, and Save at the left of the toolbar start an empty plan and read and write Hestia model "
+                + "files.",
         ]),
         Topic(title: "Move around the plan", keywords: ["zoom", "pan", "scroll", "pinch", "plan"], lines: [
             "The scroll wheel zooms the plan toward the pointer. On a trackpad, pinch to zoom and scroll with two "
@@ -63,24 +66,26 @@ enum HelpGuide {
         Topic(title: "Look around in 3D", keywords: ["orbit", "zoom", "rotate", "3d", "roof", "camera", "scroll"],
               lines: [
             "Drag to turn the house. The scroll wheel zooms in and out; on a trackpad, pinch.",
-            "The + and − buttons, or Command-= and Command-minus, zoom too.",
-            "Turn off Roof to look down into the rooms.",
+            "The zoom buttons over the 3D view's corner, or Command-= and Command-minus, zoom too.",
+            "The house button over the 3D view, or Show the roof in the inspector, hides the roof so you can look "
+                + "down into the rooms. Roof in the tool column adds or removes the roof itself.",
         ]),
         Topic(title: "Walk inside", keywords: ["walk", "inside", "wasd", "first person", "keys"], lines: [
-            "Click Walk Inside. You start in the largest room at eye height.",
+            "Click Walk Inside in the toolbar, or the walking figure over the 3D view. You start in the largest "
+                + "room at eye height.",
             "W and S, or the up and down arrows, walk forward and back. A and D step sideways.",
             "The left and right arrows, or Q and E, turn. Drag to look around. Hold Shift to go faster.",
             "Walls stop you; doors and openings let you through. Esc or Stop Walking leaves.",
         ]),
         Topic(title: "Render a photo", keywords: ["render", "photo", "blender", "picture", "realistic"], lines: [
-            "Render Photo makes a still from outside or inside, with Blender, the free 3D program.",
+            "Render Photo in the toolbar makes a still from outside or inside, with Blender, the free 3D program.",
             "Install Blender from blender.org first. The first photo fetches about 120 MB of materials, models, and "
                 + "sky from Poly Haven (CC0); later photos reuse them.",
             "Photos are saved in your Hestia-exports folder and open when done.",
         ]),
         Topic(title: "Export drawings and models", keywords: ["export", "pdf", "dxf", "usd", "cad"], lines: [
-            "Export PDF and Export DXF write the plan drawings; Export USD writes the house for 3D programs such as "
-                + "Blender.",
+            "Export in the toolbar writes the drawing set (PDF), the ground plan (DXF), or the house for 3D "
+                + "programs such as Blender (USD).",
             "Drawings are schematic and not for construction.",
         ]),
     ]
