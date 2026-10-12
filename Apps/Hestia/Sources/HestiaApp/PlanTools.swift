@@ -319,13 +319,44 @@ extension ContentView {
     }
 
     private func turnSelection() {
-        guard var current = session, case let .placement(id) = selection else { return }
+        guard var current = session else { return }
+        status = Self.commitTurn(&current, selection: selection)
+        session = current
+    }
+
+    /// What R does to the selection: turns it a quarter turn as one step, and says so; or, for what does not
+    /// turn, leaves everything as it was and says why.
+    static func commitTurn(_ current: inout EditSession, selection: PlanSelection?) -> String {
+        guard let selection else { return "Select furniture or a stair to turn first." }
         do {
-            try current.movePlacement(id, dx: 0, dy: 0, degrees: 90)
-            session = current
-            status = "Turned a quarter turn. Undo turns it back."
+            try current.turn(selection)
+            return "Turned a quarter turn. Undo turns it back."
         } catch {
-            status = HestiaModel.describe(error)
+            return HestiaModel.describe(error)
+        }
+    }
+
+    /// Copies what is selected beside itself and selects the copy (Command-D).
+    func duplicateSelection() {
+        guard var current = session else { return }
+        let result = Self.commitDuplicate(&current, selection: selection)
+        session = current
+        selection = result.selection
+        status = result.status
+    }
+
+    /// What Command-D does: copies the selection beside itself as one step and selects the copy. With nothing
+    /// selected, or a copy refused, nothing changes and the status says why; a selection that is gone is cleared.
+    static func commitDuplicate(_ current: inout EditSession,
+                                selection: PlanSelection?) -> (selection: PlanSelection?, status: String) {
+        guard let picked = selection else { return (nil, "Select something to duplicate first.") }
+        do {
+            guard let copy = try current.duplicate(picked) else {
+                return (nil, "What was selected is gone, so there is nothing to duplicate.")
+            }
+            return (copy, "Duplicated. Drag the copy into place; Undo removes it.")
+        } catch {
+            return (picked, HestiaModel.describe(error))
         }
     }
 
