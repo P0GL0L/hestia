@@ -49,7 +49,7 @@ enum FloorPlanView {
                                      elementID: outline.elementID))
         }
         for outline in outlines where outline.kind == .stair {
-            items += StairPlan.items(outline, document: document, view: view)
+            items += StairPlan.items(outline, document: document, view: view, drawn: items)
         }
         // A stair from the storey below arrives through an opening in this floor.
         for outline in stairsBelow where outline.kind == .stair {

@@ -35,12 +35,13 @@ enum RoofPlanView {
         return (paperPoint(x0, y0), paperPoint(x1, y1))
     }
 
-    static func items(_ document: ModelDocument, view: ViewTransform, roofMeshes: [Mesh] = []) -> [DisplayItem] {
+    static func items(_ document: ModelDocument, view: ViewTransform, roofMeshes: [Mesh] = [],
+                      room: PaperRect? = nil) -> [DisplayItem] {
         // Several roofs overlap and meet; drawn one by one, each would show its whole outline through the others.
         // Drawn together from above, only what shows is drawn.
         let meshed = Set(roofMeshes.compactMap(\.elementID))
         if document.roofs.count > 1, document.roofs.allSatisfy({ meshed.contains($0.id.rawValue) }) {
-            return together(document, view: view, roofMeshes: roofMeshes)
+            return together(document, view: view, roofMeshes: roofMeshes, room: room)
         }
         func at(_ x: Int64, _ y: Int64) -> Point2 { view.paper(paperPoint(x, y)) }
         var items: [DisplayItem] = []
@@ -119,7 +120,8 @@ enum RoofPlanView {
     /// against the ground, every ridge, hip, and valley that shows, the lines where one roof runs into another,
     /// nothing hidden under a higher roof; the building's outer walls dashed beneath; and on each sloped plane
     /// that shows, its pitch with an arrow pointing down the slope.
-    static func together(_ document: ModelDocument, view: ViewTransform, roofMeshes: [Mesh]) -> [DisplayItem] {
+    static func together(_ document: ModelDocument, view: ViewTransform, roofMeshes: [Mesh],
+                         room: PaperRect? = nil) -> [DisplayItem] {
         var items: [DisplayItem] = []
         for outline in SitePlanView.footprint(document) {
             items.append(DisplayItem(.polyline(points: outline.map { view.paper($0) }, closed: true),
@@ -133,9 +135,13 @@ enum RoofPlanView {
             let end = view.paper(paperPoint(Int64(segment.end.h.rounded()), Int64(segment.end.v.rounded())))
             items.append(DisplayItem(.line(start: start, end: end), style: style, elementID: segment.elementID))
         }
-        // A pitch where its plane is the top of the whole roof, not under another.
+        // A pitch where its plane is the top of the whole roof, not under another, set where it and its arrow
+        // clear the lines and the other pitches: at the plane's spot, else a little up, down, or across the
+        // slope; left out when there is no room, as the elevations give every pitch too.
         let triangles = HiddenLines.triangles(roofMeshes, view: fromAbove)
         let buffer = HiddenLines.DepthBuffer(triangles, cell: cell * 6)
+        var space = LabelSpace(items, scale: view.scale)
+        var pitches: [DisplayItem] = []
         for roof in document.roofs {
             let meshes = roofMeshes.filter { $0.elementID == roof.id.rawValue }
             let planes = RoofFolds.planes(of: meshes)
@@ -147,11 +153,29 @@ enum RoofPlanView {
                 guard buffer.at(x, y) >= -height - cell * 6 else { continue }
                 let rise = Length(ticks: Int64((slope * Double(Length.inches(12).ticks)).rounded()))
                 let at = view.paper(spot)
-                items.append(label(ratio(rise), at: at))
-                items += slopeArrow(at: at, down: (-plane.a / slope, -plane.b / slope))
+                let down = (-plane.a / slope, -plane.b / slope)
+                let step = Double(mmTicks(5))
+                let shifts: [(Double, Double)] = [(0, 0), (down.0, down.1), (-down.0, -down.1),
+                                                  (-down.1, down.0), (down.1, -down.0)]
+                let candidates = shifts.map { shift -> [DisplayItem] in
+                    let moved = paperPoint(at.x.ticks + Int64((shift.0 * step).rounded()),
+                                           at.y.ticks + Int64((shift.1 * step).rounded()))
+                    return [label(ratio(rise), at: moved)] + slopeArrow(at: moved, down: down)
+                }
+                pitches += placePitch(candidates, in: &space, room: room)
             }
         }
-        return items
+        return items + pitches
+    }
+
+    /// The first pitch mark whose text and arrow stay inside the view and clear all existing linework.
+    static func placePitch(_ candidates: [[DisplayItem]], in space: inout LabelSpace,
+                           room: PaperRect?) -> [DisplayItem] {
+        let boundary = room.map {
+            [paperPoint($0.minX, $0.minY), paperPoint($0.maxX, $0.minY),
+             paperPoint($0.maxX, $0.maxY), paperPoint($0.minX, $0.maxY)]
+        }
+        return space.place(candidates, within: boundary, strictStrokes: true)
     }
 
     /// A short arrow beside a pitch, pointing down the slope (`down` a unit plan direction).
@@ -576,7 +600,28 @@ enum CoverSheet {
         "Structure, framing, and services shown are indicative only.",
     ]
 
-    static func items(project: String, index: [Sheet], in area: PaperRect) -> [DisplayItem] {
+    /// How many sheet-index rows fit on one cover page at a readable size. The first page reserves the left foot
+    /// for notes and the right half for the legend; continuation pages use two full-width columns.
+    static func indexCapacity(in area: PaperRect, continued: Bool) -> Int {
+        let heading = area.maxY - mmTicks(45)
+        if continued {
+            let rows = max(1, Int((heading - area.minY - mmTicks(5)) / mmTicks(8)))
+            return rows * 2
+        }
+        let noteWidth = Double(area.width / 2 - mmTicks(20))
+        let wrappedNotes = notes.enumerated().map { number, note in
+            wrap("\(number + 1). \(note)", width: noteWidth, height: mmTicks(3))
+        }
+        let noteDepth = mmTicks(20) + wrappedNotes.reduce(0) { total, lines in
+            total + lines.indices.reduce(0) { $0 + ($1 == 0 ? mmTicks(8) : mmTicks(5)) }
+        }
+        return max(1, Int((heading - area.minY - noteDepth - mmTicks(5)) / mmTicks(8)))
+    }
+
+    /// One page of the cover. `index` is already bounded by `indexCapacity`; later pages contain only the
+    /// continued index, while the first retains the ordinary project title, notes, and legend.
+    static func items(project: String, index: [Sheet], in area: PaperRect,
+                      continued: Bool = false) -> [DisplayItem] {
         let left = area.minX + mmTicks(10)
         var y = area.maxY - mmTicks(20)
         let title = DisplayStyle(layer: "A-ANNO-TEXT", pen: .wide)
@@ -584,24 +629,94 @@ enum CoverSheet {
         var items = [DisplayItem(.text(position: paperPoint(left, y), string: project.uppercased(),
                                        height: .millimeters(10), rotation: .degrees(0), alignment: .left), style: title)]
         y -= mmTicks(25)
-        items.append(DisplayItem(.text(position: paperPoint(left, y), string: "SHEET INDEX", height: .millimeters(4),
+        let heading = continued ? "SHEET INDEX (continued)" : "SHEET INDEX"
+        items.append(DisplayItem(.text(position: paperPoint(left, y), string: heading, height: .millimeters(4),
                                        rotation: .degrees(0), alignment: .left), style: title))
-        for sheet in index {
-            y -= mmTicks(8)
-            items.append(DisplayItem(.text(position: paperPoint(left, y), string: sheet.number, height: .millimeters(3),
-                                           rotation: .degrees(0), alignment: .left), style: body))
-            items.append(DisplayItem(.text(position: paperPoint(left + mmTicks(30), y), string: sheet.title,
-                                           height: .millimeters(3), rotation: .degrees(0), alignment: .left), style: body))
+
+        let rowsPerColumn = continued ? indexCapacity(in: area, continued: true) / 2
+            : indexCapacity(in: area, continued: false)
+        let columnWidth = continued ? area.width / 2 : area.width
+        for (position, sheet) in index.enumerated() {
+            let column = position / rowsPerColumn, row = position % rowsPerColumn
+            let x = left + Int64(column) * columnWidth
+            let rowY = y - Int64(row + 1) * mmTicks(8)
+            items.append(DisplayItem(.text(position: paperPoint(x, rowY), string: sheet.number,
+                                           height: .millimeters(3), rotation: .degrees(0), alignment: .left),
+                                     style: body))
+            items.append(DisplayItem(.text(position: paperPoint(x + mmTicks(30), rowY), string: sheet.title,
+                                           height: .millimeters(3), rotation: .degrees(0), alignment: .left),
+                                     style: body))
         }
+        guard !continued else { return items }
+
+        let noteWidth = Double(area.width / 2 - mmTicks(20))
+        let wrappedNotes = notes.enumerated().map { number, note in
+            wrap("\(number + 1). \(note)", width: noteWidth, height: mmTicks(3))
+        }
+        y -= Int64(index.count) * mmTicks(8)
         y -= mmTicks(20)
         items.append(DisplayItem(.text(position: paperPoint(left, y), string: "GENERAL NOTES", height: .millimeters(4),
                                        rotation: .degrees(0), alignment: .left), style: title))
-        for (number, note) in notes.enumerated() {
-            y -= mmTicks(8)
-            items.append(DisplayItem(.text(position: paperPoint(left, y), string: "\(number + 1). \(note)",
-                                           height: .millimeters(3), rotation: .degrees(0), alignment: .left), style: body))
+        // Notes wrap to the left half, so the legend beside them keeps its room on any sheet size.
+        for lines in wrappedNotes {
+            for (index, line) in lines.enumerated() {
+                let gap: Int64 = index == 0 ? mmTicks(8) : mmTicks(5)
+                y -= gap
+                items.append(DisplayItem(.text(position: paperPoint(left + (index == 0 ? 0 : mmTicks(5)), y),
+                                               string: line, height: .millimeters(3), rotation: .degrees(0),
+                                               alignment: .left), style: body))
+            }
         }
-        return items + legend(at: paperPoint(area.minX + area.width / 2, area.maxY - mmTicks(45)))
+        return items + placedLegend(beside: items, below: y, in: area)
+    }
+
+    /// Words filled into lines no wider than `width` paper ticks at `height` cap height; a word wider than
+    /// the line stands alone on its line.
+    static func wrap(_ text: String, width: Double, height: Int64) -> [String] {
+        func wide(_ line: String) -> Double { HelveticaMetrics.width(of: line) * Double(height) / 0.718 }
+        var lines: [String] = []
+        var line = ""
+        for word in text.split(separator: " ").map(String.init) {
+            let next = line.isEmpty ? word : line + " " + word
+            if !line.isEmpty, wide(next) > width {
+                lines.append(line)
+                line = word
+            } else {
+                line = next
+            }
+        }
+        if !line.isEmpty { lines.append(line) }
+        return lines
+    }
+
+    /// The legend where it fits clear of the index and notes and inside the drawing area: halfway across, as on
+    /// a large sheet; else just right of the widest line; else under the notes. It is omitted rather than drawn
+    /// out of bounds or over the cover when no location is clear.
+    static func placedLegend(beside drawn: [DisplayItem], below lastLine: Int64, in area: PaperRect)
+        -> [DisplayItem] {
+        let parts = DrawingAudit.parts(drawn, scale: nil)
+        let right = Int64(parts.labels.flatMap { $0.box.corners.map(\.x) }.max() ?? Double(area.minX))
+        let top = area.maxY - mmTicks(45)
+        let candidates = [
+            paperPoint(area.minX + area.width / 2, top),
+            paperPoint(right + mmTicks(12), top),
+            paperPoint(area.minX + mmTicks(10), lastLine - mmTicks(20)),
+        ]
+        let space = LabelSpace(drawn, scale: nil)
+        for origin in candidates {
+            let legend = legend(at: origin)
+            if space.collisions(legend) == 0, fits(legend, in: area) { return legend }
+        }
+        return []
+    }
+
+    /// Whether everything drawn lies inside the area.
+    static func fits(_ items: [DisplayItem], in area: PaperRect) -> Bool {
+        let parts = DrawingAudit.parts(items, scale: nil)
+        let xs = parts.labels.flatMap { $0.box.corners.map(\.x) } + parts.strokes.flatMap { [$0.a.x, $0.b.x] }
+        let ys = parts.labels.flatMap { $0.box.corners.map(\.y) } + parts.strokes.flatMap { [$0.a.y, $0.b.y] }
+        guard let x0 = xs.min(), let x1 = xs.max(), let y0 = ys.min(), let y1 = ys.max() else { return true }
+        return x0 >= Double(area.minX) && x1 <= Double(area.maxX) && y0 >= Double(area.minY) && y1 <= Double(area.maxY)
     }
 
     /// What the abbreviations on the drawings stand for, in the order a reader looks them up.

@@ -271,6 +271,11 @@ struct ContentView: View {
             .help(rendering ? "Rendering..." : "Render a photoreal still with Blender")
             Menu {
                 Button("Drawing Set (PDF)") { exportPDF(model) }
+                Menu("Drawing Set on Another Size (PDF)") {
+                    ForEach(HestiaModel.sheetSizes, id: \.name) { paper in
+                        Button(HestiaModel.label(paper)) { exportPDF(model, on: paper) }
+                    }
+                }
                 Button("Ground Plan (DXF)") { exportDXF(model) }
                 Button("3D Model (USD)") { exportUSD(model) }
             } label: {

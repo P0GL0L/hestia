@@ -176,6 +176,26 @@ enum ScheduleView {
         return kept.isEmpty ? "" : kept + "..."
     }
 
+    /// How `items` lays a table out in `height` by `width`: the rows each column of blocks holds, how many
+    /// blocks fit side by side, and the scale they are set at. Nil when the table is too wide to set at all.
+    static func layout(_ table: Table, height: Int64, width: Int64) -> (perColumn: Int, columns: Int, scale: Double)? {
+        let fullWidth = table.columns.reduce(0) { $0 + $1.width }
+        let k = fullWidth > width ? Double(width) / Double(fullWidth) : 1.0
+        guard k >= 0.6 else { return nil }
+        let row = Int64((Double(rowHeight) * k).rounded(.down))
+        let perColumn = max(Int((height - mmTicks(10)) / row) - 1, 1)
+        let blockWidth = table.columns.reduce(0) { $0 + Int64((Double($1.width) * k).rounded(.down)) }
+        let gap = mmTicks(10)
+        let columns = max(Int((width + gap) / (blockWidth + gap)), 1)
+        return (perColumn, columns, k)
+    }
+
+    /// How many of a table's rows `items` draws in `height` by `width` without leaving any out.
+    static func capacity(_ table: Table, height: Int64, width: Int64) -> Int {
+        guard let layout = layout(table, height: height, width: width) else { return 0 }
+        return layout.perColumn * layout.columns
+    }
+
     static func height(of table: Table) -> Int64 {
         Int64(table.rows.count + 1) * rowHeight + mmTicks(10)
     }
