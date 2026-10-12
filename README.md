@@ -12,7 +12,7 @@ Former codename: ArchI-Tect. The product name is Hestia.
 
 This repository is the system of record for contribution, monitoring, and completion.
 
-The six Swift modules and the macOS app are built, and the [alpha bar](docs/ALPHA.md) is met: a new user can draw a six-room cottage with doors, windows, rooms, a hip roof, and a straight stair, orbit it in 3D, and export a schematic PDF and DXF. Work proceeds one reviewed slice at a time toward the full set of stream briefs. The `contracts-v1.0` tag that closes Stream 0 is not cut yet; [docs/WORKSTREAMS.md](docs/WORKSTREAMS.md) lists what remains.
+The six Swift modules and the macOS app are built, and the [alpha bar](docs/ALPHA.md) is met: a new user can draw a six-room cottage with doors, windows, rooms, a hip roof, and a straight stair, orbit it in 3D, and export a schematic PDF and DXF. Stream 0 is closed at [`contracts-v1.0`](https://github.com/P0GL0L/hestia/tree/contracts-v1.0). Work proceeds one reviewed slice at a time toward the remaining stream briefs; [docs/WORKSTREAMS.md](docs/WORKSTREAMS.md) lists what remains.
 
 - Alpha bar and merge authority: [docs/ALPHA.md](docs/ALPHA.md)
 

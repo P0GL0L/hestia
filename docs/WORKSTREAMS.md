@@ -8,7 +8,7 @@ Nothing is done until its issue checklist is ticked and CI is green.
 
 | Stream | Owner | Start | Close tag |
 | --- | --- | --- | --- |
-| 0 Contracts | Claude | Started. Open items are in the Stream 0 brief's checklist. | `contracts-v1.0` |
+| 0 Contracts | Claude | Complete. Closed at `contracts-v1.0`. | `contracts-v1.0` |
 | A Geometry | Claude Code | Started. Jarvis assigns its slices. | `geometry-v0.5`, then `geometry-v1.0` |
 | B App shell and 2D | Cursor | Started. Jarvis assigns its slices. | App done criteria in the issue |
 | C 3D viewport | Cursor | Started. Jarvis assigns its slices. | App done criteria in the issue |
@@ -17,7 +17,7 @@ Nothing is done until its issue checklist is ticked and CI is green.
 | F Adapters and MCP | Grok CLI | Open. The module is a stub; Jarvis assigns its first slice. | Agent issue |
 | G Catalog | Any agent Jarvis assigns | Open. The module is a stub; Jarvis assigns its first slice. | Catalog issue |
 
-Jarvis dispatched Stream 0 first. Since `docs/ALPHA.md` set the alpha bar and merge authority, Jarvis dispatches slices in any stream toward that bar; the checkpoints below remain the plan for the full release, and `contracts-v1.0` still closes Stream 0.
+Jarvis dispatched Stream 0 first, and `contracts-v1.0` closed it. Since `docs/ALPHA.md` set the alpha bar and merge authority, Jarvis dispatches slices in the remaining streams toward that bar; the checkpoints below remain the plan for the full release.
 
 ## Checkpoints
 
