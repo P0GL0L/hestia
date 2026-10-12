@@ -14,7 +14,8 @@ import Testing
 /// It writes outside.png (orbit view from the south-east), street.png (eye height from the south-east),
 /// garden.png (eye height from the south-west, the shaded side), sky.png (from well clear of the house, looking
 /// at the library's sun), inside.png and inside-1 to inside-3.png (walking, four headings from where the walk
-/// starts), and sky-mapping.txt (where SceneKit shows, and lights with, each column and row of a sky image).
+/// starts), door/door-00.png to door-13.png (walking in through the front door), and sky-mapping.txt (where
+/// SceneKit shows, and lights with, each column and row of a sky image).
 @Suite("Live view snapshots")
 struct LiveViewSnapshotTests {
     static let folder = ProcessInfo.processInfo.environment["HESTIA_SNAPSHOT_DIR"]
@@ -188,6 +189,68 @@ struct LiveViewSnapshotTests {
             #expect(shot.mean > 60 && shot.mean < 175, "inside, turn \(turn), mean \(shot.mean)")
             #expect(cast < 1.3, "inside, turn \(turn), has a color cast: \(red), \(green), \(blue)")
         }
+    }
+
+    @Test("A walk through the front door sees the room past the open leaf, never the inside of the door",
+          .enabled(if: LiveViewSnapshotTests.folder != nil))
+    @MainActor
+    func walkThroughTheFrontDoor() throws {
+        let output = URL(fileURLWithPath: try #require(Self.folder), isDirectory: true)
+            .appendingPathComponent("door", isDirectory: true)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        let library = try #require(AssetLibrary.standard(), "set HESTIA_LIBRARY to a built asset library")
+        let look = LiveLook(library: library)
+        let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let data = try Data(contentsOf: repo.appendingPathComponent("fixtures/rect-cottage.json"))
+        let model = try HestiaModel(document: SampleSite.decorate(try JSONDecoder().decode(ModelDocument.self,
+                                                                                           from: data)))
+        let world = SCNScene()
+        _ = look.light(world)
+        let content = SCNNode()
+        world.rootNode.addChildNode(content)
+        look.fill(content, with: look.houseScene(document: model.document, meshes: model.meshes))
+        show(content, ceilings: true)
+        world.lightingEnvironment.intensity = LiveLook.insideSky
+        look.roomLights(model.document).forEach(world.rootNode.addChildNode)
+
+        // The first door with floor on one side only: the way in from outside.
+        func plan(_ point: (x: Double, y: Double)) -> Point2 {
+            Point2(x: Length(ticks: Int64((point.x / HouseScene.feetPerTick).rounded())),
+                   y: Length(ticks: Int64((point.y / HouseScene.feetPerTick).rounded())))
+        }
+        let storey = try #require(model.groundStorey)
+        let doors = OpeningDetail.details(model.document, storey: storey)
+            .filter { $0.pieces.contains { $0.part == .leaf } }
+        let (frame, outside) = try #require(doors.lazy.compactMap { door -> (OpeningDetail.Frame, Double)? in
+            let reach = door.frame.wallThickness / 2 + 3
+            let left = model.onFloor(plan(door.frame.point(door.frame.middle, reach)), storey: storey)
+            let right = model.onFloor(plan(door.frame.point(door.frame.middle, -reach)), storey: storey)
+            return left == right ? nil : (door.frame, left ? -1 : 1)
+        }.first, "the cottage has a door to the outside")
+
+        // Walk in square to the wall, from three feet outside to three feet inside, as the walk moves.
+        let barriers = WalkBarriers(document: model.document, storey: storey)
+        let start = frame.point(frame.middle, outside * (frame.wallThickness / 2 + 3))
+        let inward = (x: -(start.x - frame.point(frame.middle).x), y: -(start.y - frame.point(frame.middle).y))
+        var walker = Walker(x: start.x, y: start.y, floor: frame.sill)
+        walker.heading = atan2(inward.x, inward.y)
+        for step in 0..<28 {
+            if step.isMultiple(of: 2) {
+                let eye = walker.eye
+                let ahead = Walker(x: walker.x + walker.forward.x * 10, y: walker.y + walker.forward.y * 10,
+                                   floor: walker.floor).eye
+                let shot = try save(world, eye: SCNVector3(CGFloat(eye.x), CGFloat(eye.y), CGFloat(eye.z)),
+                                    target: SCNVector3(CGFloat(ahead.x), CGFloat(ahead.y) - 0.8, CGFloat(ahead.z)),
+                                    look: look, inside: true, name: String(format: "door-%02d", step / 2),
+                                    in: output)
+                let black = shot.share { $0 < 10 }
+                #expect(black < 0.15, "step \(step) through the door is dark: \(black)")
+            }
+            walker.step(WalkInput(forward: 1), seconds: 0.05, barriers: barriers)
+        }
+        let end = frame.point(frame.middle, -outside * (frame.wallThickness / 2 + 2))
+        #expect(((walker.x - end.x) * inward.x + (walker.y - end.y) * inward.y) > 0, "the walk got inside")
     }
 
     @MainActor

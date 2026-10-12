@@ -119,7 +119,8 @@ struct WalkBarriers: Equatable, Sendable {
         self.segments = segments
     }
 
-    /// The storey's walls, each split around its doors and cased openings. Windows stay solid.
+    /// The storey's walls, each split around its doors and cased openings, and the door leaves standing open
+    /// beside them (`OpeningDetail`). Windows stay solid.
     init(document: ModelDocument, storey: StoreyID?) {
         var segments: [Segment] = []
         for wall in document.walls where wall.storeyID == storey {
@@ -146,6 +147,9 @@ struct WalkBarriers: Equatable, Sendable {
                 from = max(from, gap.1)
             }
             piece(from, length)
+        }
+        if let storey {
+            segments += OpeningDetail.leafBarriers(document, storey: storey)
         }
         self.segments = segments
     }
