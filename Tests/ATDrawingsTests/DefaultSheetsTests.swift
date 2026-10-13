@@ -57,6 +57,21 @@ private func count(_ sheet: SheetDrawing, layerPrefix: String) -> Int {
     sheet.content.items.filter { $0.style.layer.hasPrefix(layerPrefix) }.count
 }
 
+/// The true paper box around linework, labels, and filled areas, using the same Helvetica cap-height geometry
+/// as the PDF renderer rather than `DisplayList.bounds`, which deliberately counts text at its anchor only.
+private func drawnExtent(_ sheet: SheetDrawing, excludingTitleBlock: Bool = false)
+    -> (minX: Double, minY: Double, maxX: Double, maxY: Double) {
+    let items = excludingTitleBlock
+        ? sheet.content.items.filter { !$0.style.layer.hasPrefix("A-ANNO-TTLB") }
+        : sheet.content.items
+    let parts = DrawingAudit.parts(items, scale: sheet.scale)
+    var xs: [Double] = [], ys: [Double] = []
+    for stroke in parts.strokes { xs += [stroke.a.x, stroke.b.x]; ys += [stroke.a.y, stroke.b.y] }
+    for label in parts.labels { xs += label.box.corners.map(\.x); ys += label.box.corners.map(\.y) }
+    for area in parts.areas { xs += area.boundary.map(\.x); ys += area.boundary.map(\.y) }
+    return (xs.min() ?? 0, ys.min() ?? 0, xs.max() ?? 0, ys.max() ?? 0)
+}
+
 @Test func aModelWithNoWallsGetsOnlyItsPlan() throws {
     let numbers: [String] = try draw(model(walls: false, roof: false)).map(\.number)
     #expect(numbers == ["A-101"])
@@ -254,4 +269,164 @@ private func inches(_ feet: Int64, _ inches: Int64) -> Int64 { Length.feet(feet,
     }
     #expect(words.contains(scale.label), "the title block prints \(scale.label)")
     #expect(!words.contains(DrawingScale.quarterInch.label))
+}
+
+/// A long, low row of walls: 120' of 8' walls in a line, so its elevations are many times wider than tall.
+private func longRow(storeyName: String = "Ground Floor") throws -> ModelDocument {
+    var document = ModelDocument(schemaVersion: 1, project: Project(id: ProjectID(uuid(1)), name: "Row"),
+                                 buildings: [], storeys: [], walls: [], openings: [], rooms: [])
+    var commands: [AnyCommand] = [
+        AddBuildingCommand(buildingID: BuildingID(uuid(2)), name: "Row").erased,
+        AddStoreyCommand(storeyID: storey, buildingID: BuildingID(uuid(2)), name: storeyName,
+                         elevation: ft(0)).erased,
+    ]
+    for i in 0..<4 {
+        let x = Int64(i) * 30
+        commands.append(AddWallCommand(wallID: WallID(uuid(10 + i)), storeyID: storey, start: pt(x, 0),
+                                       end: pt(x + 30, 0), thickness: .inches(6), height: ft(8)).erased)
+    }
+    _ = try document.perform(batch: commands)
+    return document
+}
+
+@Test func belowGradeLevelNamesDoNotShrinkMeshElevations() throws {
+    var document = try longRow()
+    let basement = StoreyID(uuid(50))
+    let basementName = String(repeating: "BELOW GRADE BASEMENT ", count: 20)
+    _ = try document.perform(batch: [
+        AddStoreyCommand(storeyID: basement, buildingID: BuildingID(uuid(2)), name: basementName,
+                         elevation: ft(-8)).erased,
+        AddWallCommand(wallID: WallID(uuid(51)), storeyID: basement, start: pt(0, 0), end: pt(120, 0),
+                       thickness: .inches(6), height: ft(8)).erased,
+    ])
+
+    let sheet = try #require(try SchematicDrawingSet(paper: .archD)
+        .sheets(for: document, geometry: HestiaGeometryEngine()).first { $0.number == "A-201" })
+    let scales = sheet.content.items.compactMap { item -> String? in
+        guard case let .text(_, string, _, _, _) = item.primitive, string.hasPrefix("SCALE:") else { return nil }
+        return string
+    }
+    let levelLabels = sheet.content.items.compactMap { item -> String? in
+        guard item.style == ElevationView.levelStyle,
+              case let .text(_, string, _, _, _) = item.primitive else { return nil }
+        return string
+    }
+    #expect(scales.filter { $0 == "SCALE: \(SchematicDrawingSet.threeSixteenthsInch.label)" }.count == 2)
+    #expect(levelLabels.allSatisfy { !$0.hasPrefix(basementName) })
+}
+
+@Test func ordinaryFixtureElevationScalesStayAtTheirStoredValues() throws {
+    let expected: [(fixture: String, number: String, scale: DrawingScale, titleCount: Int)] = [
+        ("rect-cottage", "A-201", .quarterInch, 4),
+        ("rect-cottage", "A-301", .quarterInch, 1),
+        ("l-house", "A-201", .oneTo100, 4),
+        ("l-house", "A-301", .quarterInch, 1),
+    ]
+
+    for item in expected {
+        let sheet = try #require(draw(fixture(item.fixture)).first { $0.number == item.number })
+        let scaleTitles = sheet.content.items.compactMap { display -> String? in
+            guard case let .text(_, string, _, _, _) = display.primitive,
+                  string.hasPrefix("SCALE:") else { return nil }
+            return string
+        }
+        #expect(sheet.scale == item.scale, "\(item.fixture) \(item.number)")
+        #expect(scaleTitles.count == item.titleCount, "\(item.fixture) \(item.number)")
+        #expect(scaleTitles.allSatisfy { $0 == "SCALE: \(item.scale.label)" },
+                "\(item.fixture) \(item.number)")
+    }
+}
+
+@Test func longElevationsAndSectionsKeepTheirGroundLineAndLabelsOnTheirSheet() throws {
+    let document = try longRow()
+    for paper in SchematicDrawingSet.papers {
+        let sheets = try SchematicDrawingSet(paper: paper).sheets(for: document, geometry: HestiaGeometryEngine())
+        for number in ["A-201", "A-301"] {
+            let sheet = try #require(sheets.first { $0.number == number })
+            #expect(DrawingAudit.findings(sheet).isEmpty, "\(number) \(paper.name)")
+            // Everything, including the true Helvetica boxes rather than only text anchors, stays in the area.
+            let area = SheetFrame.drawingArea(for: paper)
+            let bounds = drawnExtent(sheet, excludingTitleBlock: true)
+            #expect(bounds.minX >= Double(area.minX) && bounds.maxX <= Double(area.minX + area.width),
+                    "\(number) \(paper.name): \(bounds)")
+            #expect(bounds.minY >= Double(area.minY) && bounds.maxY <= Double(area.minY + area.height),
+                    "\(number) \(paper.name): \(bounds)")
+        }
+    }
+}
+
+@Test func levelLabelRoomUsesPDFCapHeightAndActualUnits() {
+    let levels = [(name: "WEST WING UPPER FLOOR REFERENCE", z: Length.feet(999, inchCount: 11).ticks)]
+    let labels = [LengthFormatStyle.feetInchesFractions, .metric].map { units in
+        levels[0].name + " " + LengthFormatting.format(Length(ticks: levels[0].z), style: units)
+    }
+    let expectedWidth = labels.map {
+        HelveticaMetrics.width(of: $0) * Double(ElevationView.levelTextHeight) / 0.718
+    }.max() ?? 0
+    let expected = Int64(expectedWidth.rounded(.up)) + mmTicks(1)
+    #expect(ElevationView.labelRoom(levels) == expected)
+}
+
+@Test func longElevationLabelsUseTheirRenderedHelveticaBounds() throws {
+    let name = "WEST WING UPPER FLOOR REFERENCE"
+    let document = try longRow(storeyName: name)
+    for paper in SchematicDrawingSet.papers {
+        let sheets = try SchematicDrawingSet(paper: paper).sheets(for: document, geometry: HestiaGeometryEngine())
+        let sheet = try #require(sheets.first { $0.number == "A-201" })
+        let labels = DrawingAudit.parts(sheet.content.items, scale: sheet.scale).labels.filter {
+            $0.layer == ElevationView.levelStyle.layer && $0.string.hasPrefix(name)
+        }
+        #expect(labels.count == 4, "\(paper.name)")
+        let area = SheetFrame.drawingArea(for: paper)
+        for label in labels {
+            #expect(label.box.minX >= Double(area.minX), "\(paper.name): \(label.string)")
+            #expect(label.box.maxX <= Double(area.minX + area.width), "\(paper.name): \(label.string)")
+        }
+    }
+}
+
+/// The long elevations' scale and ground line, worked out by hand: the row is 120'-0" long and its ground line
+/// runs 1500 mm past each end, 129.8425' in all; at 3/16" = 1'-0" that is 24.3455" of paper, 197880 ticks at
+/// 8128 to the inch; at 1/8", 131920; at 1/16", 65960. Each sheet takes the largest scale whose padded view still
+/// fits beside the level labels.
+@Test func longElevationsStepDownToTheScaleThatHoldsTheirGroundLine() throws {
+    let document = try longRow()
+    let sixteenth = DrawingScale(label: "1/16\" = 1'-0\"", modelUnitsPerPaperUnit: 192)
+    let expected: [(paper: PaperSize, scale: DrawingScale, ground: Int64)] = [
+        (.archD, SchematicDrawingSet.threeSixteenthsInch, 197_880),
+        (.isoA1, SchematicDrawingSet.threeSixteenthsInch, 197_880),
+        (.archC, .eighthInch, 131_920),
+        (.isoA3, sixteenth, 65_960),
+        (.ansiB, sixteenth, 65_960),
+    ]
+    for (paper, scale, ground) in expected {
+        let sheets = try SchematicDrawingSet(paper: paper).sheets(for: document, geometry: HestiaGeometryEngine())
+        let sheet = try #require(sheets.first { $0.number == "A-201" })
+        var groundLines: [(start: Point2, end: Point2)] = []
+        var scales: [String] = []
+        var titles: [String: Point2] = [:]
+        for item in sheet.content.items {
+            if item.style == ElevationView.groundStyle, case let .line(start, end) = item.primitive {
+                groundLines.append((start, end))
+            }
+            if case let .text(position, text, _, _, _) = item.primitive {
+                if text.hasPrefix("SCALE:") { scales.append(text) }
+                if text == "SOUTH ELEVATION" || text == "NORTH ELEVATION" { titles[text] = position }
+            }
+        }
+        // South and north are the long ones, drawn first; east and west are each 6" across.
+        let longLines = groundLines.filter { abs(($0.end.x.ticks - $0.start.x.ticks) - ground) <= 1 }
+            .sorted { $0.start.y.ticks > $1.start.y.ticks }
+        #expect(longLines.count == 2, "\(paper.name): \(groundLines)")
+        #expect(scales.filter { $0 == "SCALE: \(scale.label)" }.count == 2, "\(paper.name): \(scales)")
+        let reach = scale.paper(.millimeters(1500)).ticks
+        let house = scale.paper(.feet(120)).ticks
+        for (line, titleName) in zip(longLines, ["SOUTH ELEVATION", "NORTH ELEVATION"]) {
+            let title = try #require(titles[titleName])
+            let westError = abs((title.x.ticks - line.start.x.ticks) - reach)
+            let eastError = abs((line.end.x.ticks - title.x.ticks) - house - reach)
+            #expect(westError <= 1, "\(paper.name) \(titleName): west reach \(westError)")
+            #expect(eastError <= 1, "\(paper.name) \(titleName): east reach \(eastError)")
+        }
+    }
 }

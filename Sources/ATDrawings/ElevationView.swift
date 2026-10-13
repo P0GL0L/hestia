@@ -13,6 +13,45 @@ enum ElevationView {
     static let slabStyle = DisplayStyle(layer: "A-ELEV-SLAB", pen: .medium)
     static let slabPatternStyle = DisplayStyle(layer: "A-ELEV-SLAB", pen: .extraFine)
     static let levelStyle = DisplayStyle(layer: "A-ANNO-TEXT", pen: .fine)
+    /// How far the ground line runs past the house at each end, in the model.
+    static let groundReach = Length.millimeters(1500).ticks
+    /// Level labels' text height.
+    static let levelTextHeight = mmTicks(2)
+
+    /// One level label exactly as an elevation prints it. Mesh elevations round roof marks; the fallback path
+    /// retains their model ticks, so placement considers both forms below.
+    static func levelLabel(_ level: (name: String, z: Int64), units: LengthFormatStyle,
+                           roundedRoofHeight: Bool) -> String {
+        let height = roundedRoofHeight ? markHeight(level, units: units) : Length(ticks: level.z)
+        return level.name + " " + LengthFormatting.format(height, style: units)
+    }
+
+    /// Paper room a view must keep east of its padded extent for the level labels standing past the ground
+    /// line: the widest actual label any of `levels` can print in either unit style, measured with the same
+    /// Helvetica cap-height conversion as the PDF and drawing audit, plus a millimetre.
+    static func labelRoom(_ levels: [(name: String, z: Int64)]) -> Int64 {
+        let styles: [LengthFormatStyle] = [.feetInchesFractions, .metric]
+        let labels = levels.flatMap { level in
+            styles.flatMap { units in
+                [levelLabel(level, units: units, roundedRoofHeight: false),
+                 levelLabel(level, units: units, roundedRoofHeight: true)]
+            }
+        }
+        let widest = labels.map {
+            HelveticaMetrics.width(of: $0) * Double(levelTextHeight) / 0.718
+        }.max() ?? 0
+        return Int64(widest.rounded(.up)) + mmTicks(1)
+    }
+
+    /// The levels this drawing path actually marks. Mesh elevations omit everything below grade; the wall-face
+    /// fallback draws from its lowest face and therefore retains every level.
+    static func markedLevels(_ document: ModelDocument, _ direction: ElevationDirection,
+                             roofMeshes: [Mesh], meshes: [Mesh]) -> [(name: String, z: Int64)] {
+        let all = levels(document, direction, roofMeshes: roofMeshes)
+        guard !meshes.isEmpty else { return all }
+        let ground = grade(document)
+        return all.filter { $0.z >= ground }
+    }
 
     /// Plan point → (h, depth), where smaller depth is nearer the viewer.
     static func project(_ p: Point2, _ direction: ElevationDirection) -> (h: Int64, depth: Int64) {
@@ -145,16 +184,16 @@ enum ElevationView {
             }
         }
         let minH = faces.map(\.h0).min()!, maxH = faces.map(\.h1).max()!
-        let reach = Length.millimeters(1500).ticks
+        let reach = groundReach
         items.append(DisplayItem(.line(start: at(minH - reach, grade), end: at(maxH + reach, grade)), style: groundStyle))
         // Marks start past the roof's overhang so their lines never cross it.
         let roofEdge = roofs.flatMap { $0.map(\.x.ticks) }.max() ?? maxH
         let markH = max(maxH, roofEdge)
         let units = DrawingUnits.style(document, scale: view.scale)
-        for level in levels(document, direction, roofMeshes: roofMeshes) {
+        for level in markedLevels(document, direction, roofMeshes: roofMeshes, meshes: meshes) {
             items.append(DisplayItem(.line(start: at(markH + reach / 3, level.z), end: at(markH + reach, level.z)),
                                      style: levelStyle))
-            let label = level.name + " " + LengthFormatting.format(Length(ticks: level.z), style: units)
+            let label = levelLabel(level, units: units, roundedRoofHeight: false)
             let mark = at(markH + reach / 3, level.z)
             items.append(DisplayItem(.text(position: Point2(x: mark.x, y: Length(ticks: mark.y.ticks + mmTicks(1))),
                                            string: label, height: .millimeters(2), rotation: .degrees(0),

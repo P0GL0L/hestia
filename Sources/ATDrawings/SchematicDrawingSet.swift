@@ -415,6 +415,43 @@ public struct SchematicDrawingSet: DrawingGenerator {
         }
     }
 
+    /// One elevation in its slot, placed with room for the ground line past both ends of the house and the level
+    /// labels past its east end; nil when nothing faces this way.
+    private func drawElevation(
+        _ direction: ElevationDirection, in slot: PaperRect, sheet: Sheet, document: ModelDocument,
+        geometry: any GeometryEngine, titleAt: Point2
+    ) throws -> ViewDrawing? {
+        let name = Self.name(of: .elevation(direction: direction))
+        let roofIDs = Set(document.roofs.map(\.id.rawValue))
+        let slabIDs = Set(document.slabs.map(\.id.rawValue))
+        let meshes = try geometry.meshes(of: document)
+        let roofMeshes = meshes.filter { mesh in mesh.elementID.map { roofIDs.contains($0) } ?? false }
+        let slabMeshes = meshes.filter { mesh in mesh.elementID.map { slabIDs.contains($0) } ?? false }
+        // Drawn from the meshes, an elevation needs no wall square to it: any house has one.
+        let found = meshes.isEmpty ? ElevationView.extent(document, direction, roofMeshes: roofMeshes)
+            : ElevationView.meshExtent(document, direction, meshes: meshes)
+        guard let extent = found else { return nil }
+        // The ground line runs past the house at both ends and the level labels stand past its east end:
+        // placed with room for both, so neither reaches out of the view's area into the title block or off
+        // the sheet.
+        let reach = ElevationView.groundReach
+        let padded = (min: paperPoint(extent.min.x.ticks - reach, extent.min.y.ticks),
+                      max: paperPoint(extent.max.x.ticks + reach, extent.max.y.ticks))
+        let marked = ElevationView.markedLevels(document, direction, roofMeshes: roofMeshes, meshes: meshes)
+        let room = ElevationView.labelRoom(marked)
+        let area = PaperRect(minX: slot.minX, minY: slot.minY, width: slot.width - room, height: slot.height)
+        let placed = Self.place(extent: padded, in: area, sheetScale: sheet.scale,
+                                imperial: Self.imperial(document, sheet: sheet))
+        let scale = placed.transform.scale
+        // The title stands under the house's west end, not the ground line's.
+        let corner = placed.transform.paper(extent.min)
+        let under = paperPoint(corner.x.ticks, corner.y.ticks - mmTicks(10))
+        let items = ElevationView.items(document, direction, view: placed.transform, roofMeshes: roofMeshes,
+                                        slabMeshes: slabMeshes, meshes: meshes, room: slot)
+            + SheetFrame.viewTitle(name, scale: scale, at: placed.fits ? under : titleAt)
+        return ViewDrawing(items: items, scale: scale)
+    }
+
     private func drawView(
         _ view: SheetView, in slot: PaperRect, sheet: Sheet, document: ModelDocument, geometry: any GeometryEngine
     ) throws -> ViewDrawing {
@@ -453,27 +490,8 @@ public struct SchematicDrawingSet: DrawingGenerator {
                 + SheetFrame.viewTitle("\(storeyName) Plan", scale: scale, at: placed.fits ? under : titleAt)
             return ViewDrawing(items: items, scale: scale)
         case let .elevation(direction):
-            let name = Self.name(of: view)
-            let roofIDs = Set(document.roofs.map(\.id.rawValue))
-            let slabIDs = Set(document.slabs.map(\.id.rawValue))
-            let meshes = try geometry.meshes(of: document)
-            let roofMeshes = meshes.filter { mesh in mesh.elementID.map { roofIDs.contains($0) } ?? false }
-            let slabMeshes = meshes.filter { mesh in mesh.elementID.map { slabIDs.contains($0) } ?? false }
-            // Drawn from the meshes, an elevation needs no wall square to it: any house has one.
-            let found = meshes.isEmpty ? ElevationView.extent(document, direction, roofMeshes: roofMeshes)
-                : ElevationView.meshExtent(document, direction, meshes: meshes)
-            guard let extent = found else {
-                return missing(name)
-            }
-            let placed = Self.place(extent: extent, in: slot, sheetScale: sheet.scale,
-                                imperial: Self.imperial(document, sheet: sheet))
-            let scale = placed.transform.scale
-            let under = paperPoint(placed.transform.paperOrigin.x.ticks,
-                                   placed.transform.paperOrigin.y.ticks - mmTicks(10))
-            let items = ElevationView.items(document, direction, view: placed.transform, roofMeshes: roofMeshes,
-                                            slabMeshes: slabMeshes, meshes: meshes, room: slot)
-                + SheetFrame.viewTitle(name, scale: scale, at: placed.fits ? under : titleAt)
-            return ViewDrawing(items: items, scale: scale)
+            return try drawElevation(direction, in: slot, sheet: sheet, document: document, geometry: geometry,
+                                     titleAt: titleAt) ?? missing(Self.name(of: view))
         case let .schedule(kind):
             var areas: [RoomID: Area] = [:]
             if kind == .areas {
