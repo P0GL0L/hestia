@@ -130,16 +130,16 @@ extension ElevationView {
         let segments = visibleSegments(meshes, view: lines(direction), grade: grade)
         var items = lineItems(segments, transform: view, openings: openings)
         let minH = extent.min.x.ticks, maxH = extent.max.x.ticks
-        let reach = Length.millimeters(1500).ticks
+        let reach = groundReach
         func at(_ h: Int64, _ z: Int64) -> Point2 { view.paper(paperPoint(h, z)) }
         items.append(DisplayItem(.line(start: at(minH - reach, grade), end: at(maxH + reach, grade)),
                                  style: groundStyle))
         let units = DrawingUnits.style(document, scale: view.scale)
-        let marked = levels(document, direction, roofMeshes: roofMeshes).filter { $0.z >= grade }
+        let marked = markedLevels(document, direction, roofMeshes: roofMeshes, meshes: meshes)
         for level in spaced(marked, view: view) {
             items.append(DisplayItem(.line(start: at(maxH + reach / 3, level.z), end: at(maxH + reach, level.z)),
                                      style: levelStyle))
-            let label = level.name + " " + LengthFormatting.format(markHeight(level, units: units), style: units)
+            let label = levelLabel(level, units: units, roundedRoofHeight: true)
             let mark = at(maxH + reach / 3, level.z)
             items.append(DisplayItem(.text(position: Point2(x: mark.x, y: Length(ticks: mark.y.ticks + mmTicks(1))),
                                            string: label, height: .millimeters(2), rotation: .degrees(0),
